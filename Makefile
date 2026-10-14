@@ -5,7 +5,7 @@ OBJCOPY = objcopy
 CFLAGS = -m32 -std=c11 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -fno-builtin -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -O2 -Wall -Wextra -Werror
 LDFLAGS = -m elf_i386 -T src/link.ld -nostdlib --build-id=none
 
-all: Cinmix-0.17.iso
+all: Cinmix-0.18.iso Cinmix-0.18-disk.img
 
 build:
 	mkdir -p build
@@ -32,46 +32,50 @@ build/kernel.bin: build/kernel.elf
 	$(OBJCOPY) -O binary $< $@
 	@test $$(stat -c%s $@) -le 114688 || (echo 'Kernel exceeds CD loader capacity' && exit 1)
 
-Cinmix-0.17.iso: build/cdboot.bin build/kernel.bin README.txt tools/iso.py
+Cinmix-0.18.iso: build/cdboot.bin build/kernel.bin README.txt tools/iso.py
 	python3 tools/iso.py build/cdboot.bin build/kernel.bin README.txt $@
 
-verify: Cinmix-0.17.iso
+Cinmix-0.18-disk.img: tools/disk.py
+	python3 tools/disk.py $@
+
+verify: Cinmix-0.18.iso
 	python3 tools/verify.py $< build/cdboot.bin build/kernel.bin build/kernel.elf
 	$(MAKE) smoke
 
-smoke: | build
-	$(CC) -std=gnu11 -O2 -o build/smoke tests/smoke.c src/font.c
+NATIVE_TESTS = build/smoke build/ui11 build/compositor build/controls build/ui12 build/ui13 build/ui131 build/animations build/ui133 build/fullhd build/ui15 build/ui16 build/ui17 build/storage build/ui18
+
+build/%: tests/%.c src/kernel.c src/storage.c src/font.c | build
+	$(CC) -std=gnu11 -O1 -o $@ $< src/font.c
+
+smoke: $(NATIVE_TESTS) | build
 	./build/smoke
-	$(CC) -std=gnu11 -O2 -o build/ui11 tests/ui11.c src/font.c
 	./build/ui11
-	$(CC) -std=gnu11 -O2 -o build/compositor tests/compositor.c src/font.c
 	./build/compositor
-	$(CC) -std=gnu11 -O2 -o build/controls tests/controls.c src/font.c
 	./build/controls
-	$(CC) -std=gnu11 -O2 -o build/ui12 tests/ui12.c src/font.c
 	./build/ui12
-	$(CC) -std=gnu11 -O2 -o build/ui13 tests/ui13.c src/font.c
 	./build/ui13
-	$(CC) -std=gnu11 -O2 -o build/ui131 tests/ui131.c src/font.c
 	./build/ui131
-	$(CC) -std=gnu11 -O2 -o build/animations tests/animations.c src/font.c
 	./build/animations
-	$(CC) -std=gnu11 -O2 -o build/ui133 tests/ui133.c src/font.c
 	./build/ui133
-	$(CC) -std=gnu11 -O2 -o build/fullhd tests/fullhd.c src/font.c
 	./build/fullhd
-	$(CC) -std=gnu11 -O2 -o build/ui15 tests/ui15.c src/font.c
 	./build/ui15
-	$(CC) -std=gnu11 -O2 -o build/ui16 tests/ui16.c src/font.c
 	./build/ui16
-	$(CC) -std=gnu11 -O2 -o build/ui17 tests/ui17.c src/font.c
 	./build/ui17
+	rm -f build/persistence-test.img build/unsigned-test.img build/ui18-test.img
+	python3 tools/disk.py build/persistence-test.img
+	./build/storage build/persistence-test.img save
+	./build/storage build/persistence-test.img reload
+	./build/storage build/persistence-test.img recover
+	truncate -s 16777216 build/unsigned-test.img
+	./build/storage build/unsigned-test.img unsigned
+	python3 tools/disk.py build/ui18-test.img
+	./build/ui18 build/ui18-test.img
 
 bench: | build
 	$(CC) -std=gnu11 -O2 -o build/bench tests/bench.c src/font.c
 	./build/bench
 
 clean:
-	rm -rf build Cinmix-0.17.iso
+	rm -rf build Cinmix-0.18.iso
 
 .PHONY: all verify smoke bench clean

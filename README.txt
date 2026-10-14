@@ -1,3 +1,6 @@
-Cinmix 0.17 | BIOS i386 | 1920x1080 preferred
-
-Windows 11-style Settings with working System, Personalization, Apps, Notifications, About and settings search. Explorer toolbar New/Sort/View/Details, navigation, search, virtual RAM files and keyboard selection now work. Supports Dark Aero, glass effects, tweened windows, taskbar previews and desktop hover. File storage is an in-memory demo and resets on reboot.
+Cinmix 0.18 | BIOS i386 | 1920x1080 preferred
+Persistent disk support: ATA PIO primary IDE master + signed 16MiB CinmixFS disk.
+Boot the CD ISO and attach Cinmix-0.18-disk.img as the primary IDE hard drive.
+Notes: Ctrl+S to save; saved on close. Explorer: New creates saved documents.
+Do not attach an existing real disk; Cinmix writes only to its own signed volume.
+RAM-only fallback when no valid disk is attached.

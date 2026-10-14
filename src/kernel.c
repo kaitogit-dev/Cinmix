@@ -184,6 +184,9 @@ static const char *file_types[FILE_COUNT] = {"Text Document", "Log File", "Text 
 static const char *file_sizes[FILE_COUNT] = {"2 KB", "3 KB", "1 KB", "128 KB", "4 KB"};
 static const char *file_dates[FILE_COUNT] = {"2026-10-14 20:42", "2026-10-14 20:41", "2026-10-14 20:40", "2026-10-14 20:15", "2026-10-14 19:58"};
 static char file_extra_names[3][24] = {"New document.txt", "New document 2.txt", "New document 3.txt"};
+static char notes_filename[24] = "notes.txt";
+static int notes_dirty;
+static int notes_save_failed;
 static int sketch_color = 1;
 static int sketch_brush = 1;
 static uint8_t sketch_pixels[SKETCH_H][SKETCH_W];
@@ -255,6 +258,8 @@ static inline uint8_t in8(uint16_t port) {
 static inline void out8(uint16_t port, uint8_t value) {
     __asm__ volatile("outb %0, %1" :: "a"(value), "Nd"(port));
 }
+
+#include "storage.c"
 
 static int same(const char *a, const char *b) {
     while (*a && *b && *a == *b) { a++; b++; }
@@ -522,8 +527,35 @@ static void begin_window_animation(int app, int from_x, int from_y, int from_w, 
 
 static void animated_window_rect(int app, int *x, int *y, int *w, int *h);
 
+static void notes_commit(void) {
+    if (!notes_dirty) return;
+    if (storage_ready && storage_save(notes_filename, notes, (uint32_t)notes_len)) {
+        notes_dirty = 0;
+        notes_save_failed = 0;
+    } else if (storage_ready) notes_save_failed = 1;
+    dirty = 1;
+}
+
+static int notes_select(const char *name) {
+    if (notes_dirty) {
+        notes_commit();
+        if (storage_ready && notes_dirty) return 0;
+    }
+    copy(notes_filename, name, 24);
+    notes_len = 0;
+    notes[0] = 0;
+    if (storage_ready) {
+        int loaded = storage_load(notes_filename, notes, sizeof(notes));
+        if (loaded >= 0) notes_len = loaded;
+    }
+    notes_dirty = 0;
+    notes_save_failed = 0;
+    return 1;
+}
+
 static void close_window(int app, int minimizing) {
     if (!windows[app].opened || windows[app].minimized) return;
+    if (app == NOTES) notes_commit();
     Window *w = &windows[app];
     int x, y, width, height;
     animated_window_rect(app, &x, &y, &width, &height);
@@ -1155,7 +1187,7 @@ static void execute_command(void) {
     log_write(linebuf);
     if (!console_len) return;
     if (same(console_input, "help")) print_info();
-    else if (same(console_input, "ver")) log_write("Cinmix 0.17  |  kernel 0.17  |  i386");
+    else if (same(console_input, "ver")) log_write("Cinmix 0.18  |  kernel 0.18  |  i386");
     else if (same(console_input, "clear")) log_count = 0;
     else if (same(console_input, "context")) log_write("Right click on desktop");
     else if (same(console_input, "dark")) { select_theme(3); log_write("Dark Aero enabled"); }
@@ -1168,7 +1200,7 @@ static void execute_command(void) {
         log_write("/ram/readme.txt");
         log_write("/ram/boot.log");
         log_write("/ram/notes.txt");
-    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix kernel 0.17; Explorer shell; RAM volume");
+    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix 0.18; persistent D: requires CinmixFS disk");
     else if (same(console_input, "cat boot.log")) log_write("El Torito -> kernel -> protected mode -> UI");
     else if (same(console_input, "cat notes.txt")) {
         char one[72] = "";
@@ -1176,7 +1208,9 @@ static void execute_command(void) {
         while (notes[i] && notes[i] != '\n' && i < 65) { one[i] = notes[i]; i++; }
         one[i] = 0;
         log_write(one);
-    } else if (same(console_input, "mem")) log_write("Physical canvas: 0x00400000");
+    } else if (same(console_input, "disk")) log_write(storage_ready ? "D: CinmixFS on ATA primary master" : "No formatted writable disk detected");
+    else if (same(console_input, "save")) { notes_commit(); log_write(storage_ready && !notes_dirty ? "Notes saved on D:" : "No writable storage"); }
+    else if (same(console_input, "mem")) log_write("Physical canvas: 0x00400000");
     else if (same(console_input, "cpu")) log_write(cpu_vendor);
     else if (same(console_input, "date")) { log_write(clock_date); log_write(clock_time); }
     else if (same(console_input, "screen")) {
@@ -1395,6 +1429,17 @@ static int files_list_left(int x, int cw) { return x + files_nav_width(cw) + 28;
 static int files_list_width(int cw) { return cw - files_nav_width(cw) - files_preview_width(cw) - 48; }
 static int files_row_top(int y) { return y + 134; }
 static int files_row_height(void) { return file_view ? 66 : 37; }
+static void files_restore(void) {
+    file_created = 0;
+    if (!storage_ready) return;
+    char name[24];
+    for (int k = 0; k < STORAGE_SLOTS && file_created < 3; k++) {
+        if (!storage_list(k, name)) break;
+        if (same(name, "notes.txt")) continue;
+        copy(file_extra_names[file_created++], name, 24);
+    }
+}
+
 static int files_count(void) { return FILE_COUNT + file_created; }
 static const char *files_name(int id) { return id < FILE_COUNT ? file_names[id] : file_extra_names[id - FILE_COUNT]; }
 static const char *files_type(int id) { return id < FILE_COUNT ? file_types[id] : "Text Document"; }
@@ -1446,7 +1491,10 @@ static int files_row_hit(const Window *w, int px, int py) {
     return files_item((py - row_y) / row_h);
 }
 static void files_open_selected(void) {
-    if (selected_file == 2 || selected_file >= FILE_COUNT) open_window(NOTES);
+    if (selected_file == 2 || selected_file >= FILE_COUNT) {
+        if (notes_select(files_name(selected_file))) open_window(NOTES);
+        else notify("Save current document before switching");
+    }
     else if (selected_file == 3) open_window(APPEAR);
     else if (selected_file == 4) open_window(CALENDAR);
     else dirty = 1;
@@ -1455,7 +1503,13 @@ static int files_action(const Window *w, int px, int py) {
     int x = w->x + 2, y = w->y + 34, cw = w->w - 4;
     int nw = files_nav_width(cw);
     if (inside(px, py, x + 24, y + 15, 60, 24)) {
-        if (file_created < 3) { selected_file = FILE_COUNT + file_created++; file_location = 6; file_search_len = 0; file_search[0] = 0; }
+        if (file_created < 3) {
+            const char *name = file_extra_names[file_created];
+            if (!storage_ready || storage_save(name, "", 0)) {
+                selected_file = FILE_COUNT + file_created++;
+                file_location = 6; file_search_len = 0; file_search[0] = 0;
+            } else notify("Disk write failed");
+        }
         file_search_focus = 0; return 1;
     }
     if (inside(px, py, x + 92, y + 15, 60, 24)) { file_sort = !file_sort; file_search_focus = 0; return 1; }
@@ -1579,10 +1633,10 @@ static void window_content(int app, const Window *w) {
         }
         rounded(x + 14, y + 52, cw - 212, 30, 9, UI_CARD);
         outline(x + 14, y + 52, cw - 212, 30, HAIR);
-        text(x + 27, y + 59, file_location == 6 ? "This PC  >  RAM (R:)" : "Home  >  RAM (R:)", INK);
+        text(x + 27, y + 59, storage_ready ? (file_location == 6 ? "This PC  >  Disk (D:)" : "Home  >  Disk (D:)") : (file_location == 6 ? "This PC  >  RAM (R:)" : "Home  >  RAM (R:)"), INK);
         rounded(x + cw - 168, y + 52, 154, 30, 9, UI_FIELD);
         outline(x + cw - 168, y + 52, 154, 30, file_search_focus ? BLUE : UI_EDGE);
-        text(x + cw - 158, y + 59, file_search_len ? file_search : "Search RAM", file_search_len ? INK : STEEL);
+        text(x + cw - 158, y + 59, file_search_len ? file_search : (storage_ready ? "Search Disk" : "Search RAM"), file_search_len ? INK : STEEL);
         if (file_search_focus) rect(x + cw - 158 + file_search_len * 8, y + 75, 6, 2, BLUE);
         rounded(x + 12, y + 92, nw, ch - 104, 12, LIGHT);
         text(x + 26, y + 103, "This PC", INK);
@@ -1591,7 +1645,7 @@ static void window_content(int app, const Window *w) {
             int yy = y + 132 + k * 36;
             if (file_location == k) rounded(x + 19, yy - 4, nw - 14, 30, 8, UI_HOVER);
             rounded(x + 27, yy + 5, 13, 13, 3, k == 6 ? 0xe8bd79 : (NIGHT ? 0x42617f : 0x8bb6d6));
-            text(x + 47, yy + 2, nav[k], file_location == k ? BLUE : INK2);
+            text(x + 47, yy + 2, k == 6 && storage_ready ? "Disk (D:)" : nav[k], file_location == k ? BLUE : INK2);
         }
         if (pw) {
             rounded(px, y + 92, pw, ch - 104, 12, LIGHT);
@@ -1627,7 +1681,7 @@ static void window_content(int app, const Window *w) {
         rect(lx, y + ch - 43, lw, 1, HAIR);
         char count[12]; number(count, (uint32_t)shown);
         text(lx + 5, y + ch - 32, count, INK2);
-        text(lx + 22, y + ch - 32, "items in RAM", STEEL);
+        text(lx + 22, y + ch - 32, storage_ready ? "items on D: / persistent" : "items in RAM / temporary", STEEL);
         if (pw) {
             text(px + 17, y + 106, "Details", INK);
             rounded(px + 17, y + 139, pw - 34, 91, 10, UI_CARD);
@@ -1636,19 +1690,19 @@ static void window_content(int app, const Window *w) {
             text(px + 78, y + 151, files_name(selected_file), INK);
             text(px + 78, y + 174, files_type(selected_file), STEEL);
             text(px + 17, y + 251, "Location", STEEL);
-            text(px + 17, y + 274, "RAM (R:)", INK);
+            text(px + 17, y + 274, storage_ready ? "Disk (D:)" : "RAM (R:)", INK);
             text(px + 17, y + 309, "Modified", STEEL);
             text(px + 17, y + 333, files_date(selected_file), INK);
             text(px + 17, y + 365, "Size", STEEL);
             text(px + 17, y + 389, files_size(selected_file), INK);
             rect(px + 17, y + 415, pw - 34, 1, HAIR);
-            text(px + 17, y + 435, selected_file == 2 ? "Editable in Notes" : selected_file == 3 ? "Desktop wallpaper" : selected_file == 4 ? "Calendar app data" : "Virtual RAM document", INK2);
-            text(px + 17, y + 458, "Temporary session storage", STEEL);
+            text(px + 17, y + 435, selected_file == 2 ? "Editable in Notes" : selected_file == 3 ? "Desktop wallpaper" : selected_file == 4 ? "Calendar app data" : (storage_ready ? "Saved document on D:" : "Temporary RAM document"), INK2);
+            text(px + 17, y + 458, storage_ready ? "Saved on virtual hard disk" : "Temporary session storage", STEEL);
         }
     } else if (app == NOTES) {
         rect(x, y, cw, 27, LIGHT);
-        text(x + 12, y + 6, "notes.txt", INK);
-        text(x + cw - 90, y + 6, "RAM", STEEL);
+        text(x + 12, y + 6, notes_filename, INK);
+        text(x + cw - 168, y + 6, storage_ready ? (notes_save_failed ? "WRITE ERROR" : notes_dirty ? "Not saved  Ctrl+S" : "Disk saved  Ctrl+S") : "RAM only  Ctrl+S", STEEL);
         rect(x, y + 27, cw, 1, HAIR);
         int max_columns = (cw - 30) / 8;
         if (max_columns < 1) max_columns = 1;
@@ -1693,10 +1747,10 @@ static void window_content(int app, const Window *w) {
     } else if (app == SYSTEM) {
         rect(x, y, cw, 4, BLUE);
         big_text(x + 21, y + 22, "CINMIX", INK);
-        text(x + 24, y + 62, "RELEASE 0.17", STEEL);
+        text(x + 24, y + 62, "RELEASE 0.18", STEEL);
         rect(x + 21, y + 91, cw - 42, 1, HAIR);
         text(x + 24, y + 106, "Kernel", STEEL);
-        text(x + 166, y + 106, "Cinmix 0.17", INK);
+        text(x + 166, y + 106, "Cinmix 0.18", INK);
         text(x + 24, y + 134, "Target", STEEL);
         text(x + 166, y + 134, "i386 protected", INK);
         text(x + 24, y + 162, "Firmware", STEEL);
@@ -1736,7 +1790,7 @@ static void window_content(int app, const Window *w) {
             text(x + 55, yy + 9, pages[k], settings_page == k ? INK : INK2);
         }
         rect(x + 22, y + ch - 75, nw - 20, 1, HAIR);
-        text(x + 27, y + ch - 57, "Cinmix 0.17", STEEL);
+        text(x + 27, y + ch - 57, "Cinmix 0.18", STEEL);
         text(x + 27, y + ch - 37, "1920 x 1080", STEEL);
         big_text(mx, y + 18, pages[settings_page], INK);
         if (settings_page == 1) {
@@ -1802,8 +1856,8 @@ static void window_content(int app, const Window *w) {
             number(tmp, (uint32_t)volume_level); text(mx + 295, y + 301, tmp, INK);
             rounded(mx, y + 390, mw, 109, 12, UI_CARD);
             text(mx + 22, y + 409, "Storage", INK);
-            text(mx + 22, y + 440, "RAM (R:) / temporary session", STEEL);
-            text(mx + 22, y + 466, "Files are reset when Cinmix reboots", STEEL);
+            text(mx + 22, y + 440, storage_ready ? "Disk D: / CinmixFS / ATA IDE" : "RAM R: / temporary session", STEEL);
+            text(mx + 22, y + 466, storage_ready ? "Notes and documents survive reboot" : "Attach Cinmix disk image for persistence", STEEL);
         } else if (settings_page == 2) {
             text(mx + 2, y + 61, "Installed applications", STEEL);
             for (int k = 0; k < APPS; k++) {
@@ -1830,7 +1884,7 @@ static void window_content(int app, const Window *w) {
         } else {
             text(mx + 2, y + 61, "About Cinmix", STEEL);
             rounded(mx, y + 93, mw, 222, 12, UI_CARD);
-            big_text(mx + 20, y + 116, "Cinmix 0.17", INK);
+            big_text(mx + 20, y + 116, "Cinmix 0.18", INK);
             text(mx + 23, y + 162, "32-bit i386 operating system", STEEL);
             text(mx + 23, y + 193, "Legacy BIOS / El Torito boot", STEEL);
             text(mx + 23, y + 224, "Aero desktop with Dark Aero", STEEL);
@@ -3102,6 +3156,7 @@ static void handle_key(uint8_t code) {
     }
     if (control_down && key >= 0x02 && key <= 0x08) { open_window(pinned_apps[key - 0x02]); return; }
     if (control_down && key == 0x13) { run_open = !run_open; if (run_open) { run_anim = 8; start_open = 0; context_open = 0; quick_open = 0; notification_open = 0; } dirty = 1; return; }
+    if (control_down && key == 0x1f && active_window() == NOTES) { notes_commit(); return; }
     if (control_down && key == 0x31) { open_window(NOTES); return; }
     if (control_down && key == 0x2e) { open_window(CONSOLE); return; }
     if (control_down && key == 0x14) { open_window(CLOCK); return; }
@@ -3158,13 +3213,13 @@ static void handle_key(uint8_t code) {
         return;
     }
     if (key == 0x0e) {
-        if (app == NOTES && notes_len > 0) notes[--notes_len] = 0;
+        if (app == NOTES && notes_len > 0) { notes[--notes_len] = 0; notes_dirty = 1; }
         if (app == CONSOLE && console_len > 0) console_input[--console_len] = 0;
     } else if (key == 0x1c) {
-        if (app == NOTES && notes_len < 2046) { notes[notes_len++] = '\n'; notes[notes_len] = 0; }
+        if (app == NOTES && notes_len < 2046) { notes[notes_len++] = '\n'; notes[notes_len] = 0; notes_dirty = 1; }
         else if (app == CONSOLE) execute_command();
     } else if (ch && !control_down) {
-        if (app == NOTES && notes_len < 2046) { notes[notes_len++] = ch; notes[notes_len] = 0; }
+        if (app == NOTES && notes_len < 2046) { notes[notes_len++] = ch; notes[notes_len] = 0; notes_dirty = 1; }
         if (app == CONSOLE && console_len < 78) { console_input[console_len++] = ch; console_input[console_len] = 0; }
     }
     dirty = 1;
@@ -3306,12 +3361,16 @@ void kmain(void) {
         }
     }
     notes_len = size(notes);
-    log_write("Cinmix kernel 0.17  [i386]");
-    log_write("RAM volume mounted at R:");
+    if (storage_mount()) {
+        notes_select("notes.txt");
+        files_restore();
+        log_write("CinmixFS disk mounted at D: (ATA IDE)");
+    } else log_write("RAM only: attach Cinmix disk to enable persistence");
+    log_write("Cinmix kernel 0.18  [i386]");
     init_mouse();
     init_frame_clock();
     refresh_clock();
-    notify("Cinmix 0.17 is ready");
+    notify("Cinmix 0.18 is ready");
     repaint();
     uint32_t cycles = 0;
     for (;;) {

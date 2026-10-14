@@ -86,7 +86,7 @@ def create(bootpath, kernelpath, readmepath, destination):
 
     validation = bytearray(32)
     validation[0] = 1
-    validation[4:28] = b'CINMIX 0.17'.ljust(24, b' ')
+    validation[4:28] = b'CINMIX 0.18'.ljust(24, b' ')
     validation[30:32] = b'\x55\xaa'
     checksum = -sum(struct.unpack('<16H', validation)) & 0xffff
     struct.pack_into('<H', validation, 28, checksum)

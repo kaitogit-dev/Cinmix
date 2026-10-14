@@ -1,27 +1,39 @@
-# Cinmix 0.17 — Windows-style Settings and Explorer controls
+# Cinmix 0.18 — Persistent storage
 
-Cinmix is a freestanding, 32-bit i386 desktop OS booting from a legacy BIOS El Torito CD image, targeting **1920×1080** with a Windows 7 Aero and Windows 11-inspired appearance.
+Cinmix is a freestanding 32-bit x86 operating system with a Windows-inspired Aero desktop at 1920×1080. **Version 0.18 adds persistent storage**, while preserving the Windows-style Settings, File Explorer, Dark Aero, window animations and all existing applications.
 
-## New in 0.17
+## What works
 
-- **Windows 11–inspired Settings app:** The old Appearance window is now Settings. It has a sidebar with **System**, **Personalization**, **Apps**, **Notifications**, and **About** pages. Choose light or Dark Aero, select themes, wallpapers, glass strength and accent colors; control software volume and Quiet mode; clear notification history; view display and storage information; or open installed apps directly from Settings.
-- **Settings search:** Click the search field, enter a setting category such as `theme`, `display`, `volume`, `apps`, `quiet`, `wallpaper`, or `about`, and press Enter. `Ctrl+F` focuses search while Settings is active.
-- **File Explorer controls work:** **New** creates one of three temporary RAM documents. **Sort** reverses the file order; **View** switches between details and a taller list layout; **...** shows or hides the details pane. The left navigation filters files by virtual category. The breadcrumb returns to RAM. Search supports keyboard input, backspace, and Escape; `Ctrl+F` focuses it. Click a row to select, use Up/Down to move selection, or press Enter to open a supported item in Notes, Settings or Calendar.
-- **Responsive Settings layout:** Compact spacing keeps Personalization controls reachable in 1280×720 windows as well as the preferred 1920×1080 mode.
-- **Preserved:** Dark Aero, mouse cursor, desktop icon hover highlights, taskbar previews and running highlights, animated windows and panels, Notification Center, Run, sketching and other built-in apps.
+- **ATA PIO** 28-bit LBA sector I/O on the **primary IDE master** using ports `0x1F0–0x1F7` and `0x3F6`, with hardware identification and bounded status waits.
+- **CinmixFS**: a compact filesystem with a signed superblock, CRC32 checksums, alternating directory copies and copy-on-write data banks. A write that fails before committing directory metadata does not replace the previously saved version.
+- **Notes:** `Ctrl+S` saves the current document to the attached disk; closing or minimizing Notes also saves it. Opening a saved document in Explorer loads its contents from the disk. The default `notes.txt` persists too.
+- **File Explorer:** New Document creates a real entry on the disk; saved documents appear again when the same disk image is attached at the next boot. The app keeps existing navigation, sorting, searching and details controls.
+- **Settings > System > Storage** shows whether the writable disk is detected. The Console `disk` command also reports it.
+- **Safety:** Cinmix will not format any disk automatically. It enables writing only if the expected CinmixFS signature, version, geometry and directory checksums are valid. Without a valid disk it stays in temporary RAM-only mode.
 
-## Current storage limitations
+## Running Cinmix with a writable disk
 
-Explorer is an **in-memory virtual RAM browser**, not yet a driver-backed NTFS/FAT filesystem. Its preloaded entries are demonstrations and new RAM documents disappear after reboot. The Notes app remains a volatile text editor, and audio volume is a software UI value without an audio device driver. Display resolution is selected by compatible firmware at boot rather than dynamically in Settings.
+Use **two files together**: the bootable `Cinmix-0.18.iso` and the separate `Cinmix-0.18-disk.img` (16 MiB). Use the **same disk image for subsequent boots** to preserve data; **do not download a fresh empty disk image over your saved one**. Back up your image regularly.
 
-## Build and test
+For example, in QEMU:
 
-On Linux with GCC (including `-m32` support), GNU binutils and Python 3:
+```sh
+qemu-system-i386 -m 256 -vga std -cdrom Cinmix-0.18.iso -boot d -drive file=Cinmix-0.18-disk.img,format=raw,if=ide,index=0
+```
+
+The CD image boots the OS; the disk image is a writable **primary IDE master hard disk**. The loader does not boot from the disk. To create a new blank CinmixFS image yourself, run `python3 tools/disk.py new-disk.img`. The command refuses to overwrite an existing file. Using the ISO alone still works, but new documents and notes are temporary.
+
+### Filesystem limitations
+
+CinmixFS is **not FAT/NTFS/ext** and cannot be mounted directly by the host operating system. Version 0.18 supports 16 fixed document slots, up to 4096 bytes per file (Notes edits up to 2047 characters). Explorer exposes its three user-created document slots plus built-in demonstration entries; disk storage is not yet a general-purpose filesystem with folders, deletion, and file extension associations. Running programs and the framebuffer still require RAM; the disk removes the loss of saved documents between boots, not the use of RAM itself. The implementation does not handle real hardware DMA, SATA/AHCI or USB storage.
+
+## Build and tests
+
+On Linux with GCC, GNU binutils, Python 3 and `-m32` compilation support:
 
 ```sh
 make verify
+make all
 ```
 
-This builds `Cinmix-0.17.iso`, checks ISO9660/El Torito structure and the 56-sector kernel bootloader, and executes **13 native test suites**, including a real-mouse-packet test of Explorer and Settings at 1920×1080. The larger bootloader image supports up to 112 KiB of kernel code, instead of the previous 96 KiB limit. Native tests and ISO structure checks **do not prove successful boot or smooth performance in a BIOS emulator**. Full BIOS emulator execution still needs to be confirmed in your environment.
-
-All Cinmix preferences and RAM file entries reset on reboot. Font licensing information is in `FONT-LICENSE.txt`.
+`make verify` runs ISO9660 and El Torito structure checks, native UI regressions, persistence tests that save and reopen the disk **across separate native processes**, a simulated failed metadata commit, and end-to-end Explorer/Notes save and remount interactions. `make all` creates both ISO and disk image. The disk image is not regenerated if it already exists. **A full BIOS-emulator boot has not been tested in this environment**; native mocked sector I/O validates the filesystem logic but cannot prove ATA hardware compatibility in every emulator. Never use an existing personal disk with experimental OS software.

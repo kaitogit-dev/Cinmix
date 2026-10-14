@@ -68,7 +68,7 @@ def check(iso_path, boot_path, kernel_path, elf_path):
     assert b'\xb8\x80\x07' in kernel[:512]
     assert b'\xb8\x38\x04' in kernel[:512]
     assert b'CINMIX_0_17' in sector(16)
-    assert b'CINMIX 0.17' in entry
+    assert b'CINMIX 0.18' in entry
 
     folder = sector(22)
     names = []
