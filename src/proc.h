@@ -6,6 +6,11 @@
 #define CM_USER_DATA (CM_USER_BASE + 0x2000u)
 #define CM_USER_TOP (CM_USER_BASE + 0x003fffe0u)
 #define CM_USER_COUNT 2
+#define CM_PAINT_MAILBOX (CM_USER_BASE + 0x2100u)
+#define CM_PAINT_BUFFER (CM_USER_BASE + 0x10000u)
+#define CM_PAINT_WIDTH 224u
+#define CM_PAINT_HEIGHT 110u
+#define CM_PAINT_STAMP 1u
 #define CM_KERNEL_CODE 0x08u
 #define CM_KERNEL_DATA 0x10u
 #define CM_USER_CODE_SELECTOR 0x1bu
@@ -41,6 +46,15 @@ typedef struct {
     uint32_t last_error;
 } CmUserTask;
 
+typedef struct {
+    volatile uint32_t command;
+    int32_t x;
+    int32_t y;
+    uint32_t radius;
+    uint32_t color;
+    volatile uint32_t completed;
+} CmPaintMailbox;
+
 extern volatile uint32_t cm_host_stack;
 extern volatile uint32_t cm_run_address_space;
 extern volatile uint32_t cm_run_frame;
@@ -62,5 +76,8 @@ uint32_t cm_proc_active_tasks(void);
 uint32_t cm_proc_interrupt(CmInterruptFrame *frame, int reason);
 void cm_proc_reset_stats(void);
 int cm_proc_fault_demo(void);
+int cm_paint_submit(int x, int y, uint32_t color, uint32_t radius);
+int cm_paint_collect(uint8_t *pixels, uint32_t count);
+int cm_paint_pending(void);
 
 #endif

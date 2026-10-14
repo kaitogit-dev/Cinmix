@@ -1,6 +1,10 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "proc.h"
+#include "pinta.c"
+#ifndef __i386__
+int cm_paint_submit(int x, int y, uint32_t color, uint32_t radius) { (void)x; (void)y; (void)color; (void)radius; return 0; }
+#endif
 
 extern uint32_t boot_fb;
 extern uint16_t boot_pitch;
@@ -69,7 +73,7 @@ static const uint32_t palette[4][13] = {
 typedef struct { int x; int y; int w; int h; int opened; int minimized; int order; int maximized; int restore_x; int restore_y; int restore_w; int restore_h; } Window;
 
 static Window windows[APPS];
-static const char *app_name[APPS] = {"Files", "Notes", "Console", "System", "Clock", "Calculator", "Settings", "Sketch", "Calendar", "Windows"};
+static const char *app_name[APPS] = {"Files", "Notes", "Console", "System", "Clock", "Calculator", "Settings", "Pinta", "Calendar", "Windows"};
 static int anim_x0[APPS], anim_y0[APPS], anim_w0[APPS], anim_h0[APPS], anim_ticks[APPS], anim_total[APPS], anim_visible[APPS], anim_exit[APPS];
 static int quick_open;
 static int start_anim;
@@ -192,7 +196,16 @@ static int sketch_color = 1;
 static int sketch_brush = 1;
 static uint8_t sketch_pixels[SKETCH_H][SKETCH_W];
 static uint8_t sketch_undo[SKETCH_H][SKETCH_W];
+static uint8_t sketch_redo[SKETCH_H][SKETCH_W];
+static uint32_t sketch_fill_stack[SKETCH_H * SKETCH_W];
 static int sketch_has_undo;
+static int sketch_has_redo;
+static int sketch_tool = PINTA_BRUSH;
+static int sketch_stroking;
+static int sketch_x0, sketch_y0, sketch_prev_x, sketch_prev_y;
+static int sketch_dirty;
+static int sketch_saved;
+static int sketch_disk_loaded;
 static int calendar_shift;
 static int calendar_day;
 static char menu_query[32];
@@ -201,7 +214,7 @@ static int run_open;
 static int run_anim;
 static char run_input[40];
 static int run_len;
-static const uint32_t ink_colors[7] = {0xffffff,0x222d37,0xde9060,0x447e85,0x567cb0,0x73946c,0xb35464};
+static const uint32_t ink_colors[9] = {0xffffff,0x222d37,0xde9060,0x447e85,0x567cb0,0x73946c,0xb35464,0xf0d26a,0x9165b5};
 static int dirty = 1;
 static int shift_down;
 static int control_down;
@@ -581,9 +594,13 @@ static int notes_select(const char *name) {
     return 1;
 }
 
+static int pinta_save_document(void);
+static int pinta_load_document(void);
+
 static void close_window(int app, int minimizing) {
     if (!windows[app].opened || windows[app].minimized) return;
     if (app == NOTES) notes_commit();
+    if (app == SKETCH && sketch_dirty) pinta_save_document();
     uint32_t handle = cm_window_handle(app);
     if (handle) {
         cm_post(handle, minimizing ? CM_MSG_MINIMIZE : CM_MSG_CLOSE, 0, 0);
@@ -1222,7 +1239,7 @@ static void execute_command(void) {
     log_write(linebuf);
     if (!console_len) return;
     if (same(console_input, "help")) print_info();
-    else if (same(console_input, "ver")) log_write("Cinmix 0.21  |  kernel 0.21  |  i386");
+    else if (same(console_input, "ver")) log_write("Cinmix 0.22  |  kernel 0.22  |  i386");
     else if (same(console_input, "clear")) log_count = 0;
     else if (same(console_input, "context")) log_write("Right click on desktop");
     else if (same(console_input, "dark")) { select_theme(3); log_write("Dark Aero enabled"); }
@@ -1235,7 +1252,7 @@ static void execute_command(void) {
         log_write("/ram/readme.txt");
         log_write("/ram/boot.log");
         log_write("/ram/notes.txt");
-    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix 0.21; persistent D: requires CinmixFS disk");
+    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix 0.22; persistent D: requires CinmixFS disk");
     else if (same(console_input, "cat boot.log")) log_write("El Torito -> kernel -> protected mode -> UI");
     else if (same(console_input, "cat notes.txt")) {
         char one[72] = "";
@@ -1313,7 +1330,7 @@ static void execute_command(void) {
     }
     else if (same(console_input, "clock")) open_window(CLOCK);
     else if (same(console_input, "calc")) open_window(CALC);
-    else if (same(console_input, "sketch")) open_window(SKETCH);
+    else if (same(console_input, "sketch") || same(console_input, "pinta")) open_window(SKETCH);
     else if (same(console_input, "theme")) open_window(APPEAR);
     else if (same(console_input, "calendar")) open_window(CALENDAR);
     else if (same(console_input, "windows")) open_window(WINDOWS_APP);
@@ -1398,7 +1415,7 @@ static int app_from_command(const char *name) {
     if (same_fold(name, "clock")) return CLOCK;
     if (same_fold(name, "calculator") || same_fold(name, "calc")) return CALC;
     if (same_fold(name, "appearance") || same_fold(name, "settings")) return APPEAR;
-    if (same_fold(name, "sketch") || same_fold(name, "paint")) return SKETCH;
+    if (same_fold(name, "sketch") || same_fold(name, "paint") || same_fold(name, "pinta")) return SKETCH;
     if (same_fold(name, "calendar")) return CALENDAR;
     if (same_fold(name, "windows")) return WINDOWS_APP;
     return -1;
@@ -1494,14 +1511,82 @@ static void snapshot_sketch(void) {
     for (int yy = 0; yy < SKETCH_H; yy++)
         for (int xx = 0; xx < SKETCH_W; xx++) sketch_undo[yy][xx] = sketch_pixels[yy][xx];
     sketch_has_undo = 1;
+    sketch_has_redo = 0;
 }
 
 static void undo_sketch(void) {
     if (!sketch_has_undo) return;
-    for (int yy = 0; yy < SKETCH_H; yy++)
-        for (int xx = 0; xx < SKETCH_W; xx++) sketch_pixels[yy][xx] = sketch_undo[yy][xx];
+    pinta_copy(&sketch_redo[0][0], &sketch_pixels[0][0], SKETCH_W * SKETCH_H);
+    pinta_copy(&sketch_pixels[0][0], &sketch_undo[0][0], SKETCH_W * SKETCH_H);
     sketch_has_undo = 0;
+    sketch_has_redo = 1;
+    sketch_dirty = 1;
     dirty = 1;
+}
+
+static void redo_sketch(void) {
+    if (!sketch_has_redo) return;
+    pinta_copy(&sketch_undo[0][0], &sketch_pixels[0][0], SKETCH_W * SKETCH_H);
+    pinta_copy(&sketch_pixels[0][0], &sketch_redo[0][0], SKETCH_W * SKETCH_H);
+    sketch_has_undo = 1;
+    sketch_has_redo = 0;
+    sketch_dirty = 1;
+    dirty = 1;
+}
+
+static int pinta_save_document(void) {
+    if (!storage_ready) { sketch_saved = 0; return 0; }
+    const uint8_t *bytes = &sketch_pixels[0][0];
+    for (int k = 0; k < 7; k++) {
+        char name[15] = "painting0.cmx";
+        name[8] = (char)('0' + k);
+        char path[48] = "\\??\\D:\\";
+        append(path, name, sizeof(path));
+        uint32_t offset = (uint32_t)k * 4096u;
+        uint32_t count = SKETCH_W * SKETCH_H - offset;
+        if (count > 4096u) count = 4096u;
+        IO_STATUS_BLOCK io = {0};
+        HANDLE file = 0;
+        NTSTATUS status = nt_open_ascii(&file, path, FILE_WRITE_DATA, FILE_OVERWRITE_IF);
+        if (NT_SUCCESS(status)) status = NtWriteFile(file, 0, NULL, NULL, &io, bytes + offset, count, NULL, NULL);
+        if (NT_SUCCESS(status)) status = NtFlushBuffersFile(file, &io);
+        if (file) {
+            if (NT_SUCCESS(status)) status = NtClose(file);
+            else nt_file_abort(file);
+        }
+        if (!NT_SUCCESS(status)) { sketch_saved = 0; return 0; }
+    }
+    sketch_dirty = 0;
+    sketch_saved = 1;
+    dirty = 1;
+    return 1;
+}
+
+static int pinta_load_document(void) {
+    if (!storage_ready) return 0;
+    static uint8_t loaded[SKETCH_W * SKETCH_H];
+    for (int k = 0; k < 7; k++) {
+        char name[15] = "painting0.cmx";
+        name[8] = (char)('0' + k);
+        char path[48] = "\\??\\D:\\";
+        append(path, name, sizeof(path));
+        IO_STATUS_BLOCK io = {0};
+        HANDLE file = 0;
+        uint32_t offset = (uint32_t)k * 4096u;
+        uint32_t count = SKETCH_W * SKETCH_H - offset;
+        if (count > 4096u) count = 4096u;
+        NTSTATUS status = nt_open_ascii(&file, path, FILE_READ_DATA, FILE_OPEN);
+        if (NT_SUCCESS(status)) status = NtReadFile(file, 0, NULL, NULL, &io, loaded + offset, count, NULL, NULL);
+        if (file) NtClose(file);
+        if (!NT_SUCCESS(status) || io.Information != count) return 0;
+    }
+    pinta_copy(&sketch_pixels[0][0], loaded, SKETCH_W * SKETCH_H);
+    sketch_has_undo = 0;
+    sketch_has_redo = 0;
+    sketch_dirty = 0;
+    sketch_saved = 1;
+    dirty = 1;
+    return 1;
 }
 
 static int files_nav_width(int cw) { return cw >= 900 ? 188 : 156; }
@@ -1833,10 +1918,10 @@ static void window_content(int app, const Window *w) {
     } else if (app == SYSTEM) {
         rect(x, y, cw, 4, BLUE);
         big_text(x + 21, y + 22, "CINMIX", INK);
-        text(x + 24, y + 62, "RELEASE 0.21", STEEL);
+        text(x + 24, y + 62, "RELEASE 0.22", STEEL);
         rect(x + 21, y + 91, cw - 42, 1, HAIR);
         text(x + 24, y + 106, "Kernel", STEEL);
-        text(x + 166, y + 106, "Cinmix 0.21", INK);
+        text(x + 166, y + 106, "Cinmix 0.22", INK);
         text(x + 24, y + 134, "Target", STEEL);
         text(x + 166, y + 134, "i386 protected", INK);
         text(x + 24, y + 162, "Firmware", STEEL);
@@ -1897,7 +1982,7 @@ static void window_content(int app, const Window *w) {
             text(x + 55, yy + 9, pages[k], settings_page == k ? INK : INK2);
         }
         rect(x + 22, y + ch - 75, nw - 20, 1, HAIR);
-        text(x + 27, y + ch - 57, "Cinmix 0.21", STEEL);
+        text(x + 27, y + ch - 57, "Cinmix 0.22", STEEL);
         text(x + 27, y + ch - 37, "1920 x 1080", STEEL);
         big_text(mx, y + 18, pages[settings_page], INK);
         if (settings_page == 1) {
@@ -1991,34 +2076,62 @@ static void window_content(int app, const Window *w) {
         } else {
             text(mx + 2, y + 61, "About Cinmix", STEEL);
             rounded(mx, y + 93, mw, 222, 12, UI_CARD);
-            big_text(mx + 20, y + 116, "Cinmix 0.21", INK);
+            big_text(mx + 20, y + 116, "Cinmix 0.22", INK);
             text(mx + 23, y + 162, "32-bit i386 operating system", STEEL);
             text(mx + 23, y + 193, "Legacy BIOS / El Torito boot", STEEL);
             text(mx + 23, y + 224, "Aero desktop with Dark Aero", STEEL);
             text(mx + 23, y + 255, "Session data is volatile RAM storage", STEEL);
         }
     } else if (app == SKETCH) {
-        text(x + 18, y + 16, "UNTITLED", INK);
-        text(x + cw - 93, y + 16, "RAM", STEEL);
-        rect(x + 18, y + 44, SKETCH_W * 2, SKETCH_H * 2, WHITE);
-        outline(x + 17, y + 43, SKETCH_W * 2 + 2, SKETCH_H * 2 + 2, HAIR);
-        for (int row = 0; row < SKETCH_H; row++) {
-            for (int col = 0; col < SKETCH_W; col++) {
-                uint8_t color = sketch_pixels[row][col];
-                if (color) rect(x + 18 + 2 * col, y + 44 + 2 * row, 2, 2, ink_colors[color]);
-            }
+        int scale = cw >= 900 ? 3 : 2;
+        int paint_x = x + 18, paint_y = y + 44;
+        int tools_x = x + cw - 247;
+        text(x + 19, y + 14, "PINTA  -  Untitled", INK);
+        text(x + cw - 195, y + 14, "native port / MIT", STEEL);
+        rounded(paint_x - 5, paint_y - 5, SKETCH_W * scale + 10, SKETCH_H * scale + 10, 9, UI_FIELD);
+        rect(paint_x, paint_y, SKETCH_W * scale, SKETCH_H * scale, WHITE);
+        for (int row = 0; row < SKETCH_H; row++) for (int col = 0; col < SKETCH_W; col++) {
+            uint8_t color = sketch_pixels[row][col];
+            if (color) rect(paint_x + scale * col, paint_y + scale * row, scale, scale, ink_colors[color]);
         }
-        rect(x + 18, y + ch - 56, cw - 36, 1, HAIR);
-        for (int k = 0; k < 6; k++) {
-            int px = x + 18 + 41 * k;
-            int py = y + ch - 44;
-            rect(px, py, 29, 29, ink_colors[k + 1]);
+        outline(paint_x - 1, paint_y - 1, SKETCH_W * scale + 2, SKETCH_H * scale + 2, HAIR);
+        const char *tools[PINTA_TOOLS] = {"Pencil", "Brush", "Eraser", "Line", "Rect", "Fill"};
+        text(tools_x + 7, y + 48, "TOOLS", STEEL);
+        for (int k = 0; k < PINTA_TOOLS; k++) {
+            int tx = tools_x + (k % 2) * 118, ty = y + 68 + (k / 2) * 44;
+            rounded(tx, ty, 107, 36, 8, sketch_tool == k ? UI_HOVER : UI_CARD);
+            if (sketch_tool == k) outline(tx, ty, 107, 36, BLUE);
+            text(tx + 11, ty + 10, tools[k], sketch_tool == k ? BLUE : INK);
+        }
+        text(tools_x + 7, y + 224, "Brush size", STEEL);
+        rounded(tools_x + 8, y + 249, 34, 29, 7, UI_CARD);
+        text(tools_x + 21, y + 255, "-", INK);
+        rounded(tools_x + 52, y + 249, 34, 29, 7, UI_CARD);
+        text(tools_x + 64, y + 255, "+", INK);
+        char brush_size[12]; number(brush_size, (uint32_t)sketch_brush);
+        text(tools_x + 103, y + 256, brush_size, INK);
+        text(tools_x + 7, y + 297, "HISTORY", STEEL);
+        rounded(tools_x + 8, y + 317, 105, 33, 8, UI_CARD);
+        text(tools_x + 30, y + 326, "Undo", sketch_has_undo ? INK : STEEL);
+        rounded(tools_x + 122, y + 317, 105, 33, 8, UI_CARD);
+        text(tools_x + 144, y + 326, "Redo", sketch_has_redo ? INK : STEEL);
+        rounded(tools_x + 8, y + 359, 105, 33, 8, UI_CARD);
+        text(tools_x + 30, y + 368, "Clear", INK);
+        rounded(tools_x + 122, y + 359, 105, 33, 8, UI_CARD);
+        text(tools_x + 144, y + 368, "Save", storage_ready ? BLUE : STEEL);
+        rect(x + 18, y + ch - 61, cw - 36, 1, HAIR);
+        text(x + 20, y + ch - 83, sketch_dirty ? "Unsaved changes" : sketch_saved ? "Saved to Disk D:" : "Image / RGB palette", STEEL);
+        for (int k = 0; k < 8; k++) {
+            int px = x + 18 + 41 * k, py = y + ch - 44;
+            rounded(px, py, 29, 29, 5, ink_colors[k + 1]);
             if (sketch_color == k + 1) outline(px - 3, py - 3, 35, 35, BLUE);
         }
-        rounded(x + cw - 199, y + ch - 43, 85, 29, 6, LIGHT);
-        text(x + cw - 177, y + ch - 37, "Undo", sketch_has_undo ? INK : STEEL);
-        rounded(x + cw - 102, y + ch - 43, 84, 29, 6, LIGHT);
-        text(x + cw - 86, y + ch - 37, "Clear", INK);
+        if (cw < 900) {
+            rounded(x + cw - 199, y + ch - 43, 85, 29, 6, LIGHT);
+            text(x + cw - 177, y + ch - 37, "Undo", sketch_has_undo ? INK : STEEL);
+            rounded(x + cw - 102, y + ch - 43, 84, 29, 6, LIGHT);
+            text(x + cw - 86, y + ch - 37, "Clear", INK);
+        }
     } else if (app == CALENDAR) {
         int year, month;
         calendar_month(&year, &month);
@@ -2820,19 +2933,51 @@ static int inside(int px, int py, int x, int y, int w, int h) {
     return px >= x && px < x + w && py >= y && py < y + h;
 }
 
-static void sketch_paint(int px, int py) {
+static int sketch_coordinates(int px, int py, int *xx, int *yy) {
     Window *w = &windows[SKETCH];
-    int xx = px - (w->x + 20);
-    int yy = py - (w->y + 34 + 44);
-    if (xx < 0 || yy < 0 || xx >= SKETCH_W * 2 || yy >= SKETCH_H * 2) return;
-    xx /= 2;
-    yy /= 2;
-    for (int dy = -sketch_brush; dy <= sketch_brush; dy++) {
-        for (int dx = -sketch_brush; dx <= sketch_brush; dx++) {
-            int tx = xx + dx, ty = yy + dy;
-            if (tx >= 0 && ty >= 0 && tx < SKETCH_W && ty < SKETCH_H) sketch_pixels[ty][tx] = (uint8_t)sketch_color;
-        }
+    int scale = w->w >= 900 ? 3 : 2;
+    int x = px - (w->x + 20);
+    int y = py - (w->y + 34 + 44);
+    if (x < 0 || y < 0 || x >= SKETCH_W * scale || y >= SKETCH_H * scale) return 0;
+    *xx = x / scale;
+    *yy = y / scale;
+    return 1;
+}
+
+static void sketch_paint(int px, int py) {
+    int xx, yy;
+    if (!sketch_coordinates(px, py, &xx, &yy)) return;
+    int color = sketch_tool == PINTA_ERASER ? 0 : sketch_color;
+    int radius = sketch_tool == PINTA_PENCIL || sketch_tool == PINTA_ERASER ? 0 : sketch_brush;
+    if (!sketch_stroking) {
+        sketch_x0 = xx;
+        sketch_y0 = yy;
+        sketch_prev_x = xx;
+        sketch_prev_y = yy;
+        sketch_stroking = 1;
     }
+    if (sketch_tool == PINTA_PENCIL || sketch_tool == PINTA_BRUSH || sketch_tool == PINTA_ERASER) {
+        pinta_line(&sketch_pixels[0][0], SKETCH_W, SKETCH_H, sketch_prev_x, sketch_prev_y, xx, yy, color, radius);
+        cm_paint_submit(xx, yy, (uint32_t)color, (uint32_t)radius);
+    } else if (sketch_tool == PINTA_FILL) {
+        pinta_fill(&sketch_pixels[0][0], SKETCH_W, SKETCH_H, xx, yy, color, sketch_fill_stack, SKETCH_W * SKETCH_H);
+    } else {
+        pinta_stamp(&sketch_pixels[0][0], SKETCH_W, SKETCH_H, xx, yy, color, 0);
+    }
+    sketch_prev_x = xx;
+    sketch_prev_y = yy;
+    sketch_dirty = 1;
+    dirty = 1;
+}
+
+static void sketch_finish(int px, int py) {
+    if (!sketch_stroking) return;
+    int xx, yy;
+    if (sketch_coordinates(px, py, &xx, &yy)) {
+        if (sketch_tool == PINTA_LINE) pinta_line(&sketch_pixels[0][0], SKETCH_W, SKETCH_H, sketch_x0, sketch_y0, xx, yy, sketch_color, 0);
+        if (sketch_tool == PINTA_RECTANGLE) pinta_rectangle(&sketch_pixels[0][0], SKETCH_W, SKETCH_H, sketch_x0, sketch_y0, xx, yy, sketch_color, 0);
+    }
+    sketch_stroking = 0;
     dirty = 1;
 }
 
@@ -3044,19 +3189,37 @@ static void handle_click(void) {
             } else if (i == SKETCH) {
                 int xx = w->x + 2;
                 int yy = w->y + 34;
-                if (inside(mouse_x, mouse_y, xx + 18, yy + 44, SKETCH_W * 2, SKETCH_H * 2)) {
+                int cw = w->w - 4;
+                int scale = cw >= 900 ? 3 : 2;
+                int tools_x = xx + cw - 247;
+                if (inside(mouse_x, mouse_y, xx + 18, yy + 44, SKETCH_W * scale, SKETCH_H * scale)) {
                     snapshot_sketch();
+                    sketch_stroking = 0;
                     sketch_paint(mouse_x, mouse_y);
                 }
-                int bottom = yy + (w->h - 36) - 44;
-                for (int k = 0; k < 6; k++) {
-                    if (inside(mouse_x, mouse_y, xx + 18 + 41 * k, bottom, 29, 29)) sketch_color = k + 1;
+                for (int k = 0; k < PINTA_TOOLS; k++) {
+                    int tx = tools_x + (k % 2) * 118, ty = yy + 68 + (k / 2) * 44;
+                    if (inside(mouse_x, mouse_y, tx, ty, 107, 36)) { sketch_tool = k; sketch_stroking = 0; }
                 }
-                if (inside(mouse_x, mouse_y, xx + w->w - 4 - 199, bottom + 1, 85, 28)) undo_sketch();
-                if (inside(mouse_x, mouse_y, xx + w->w - 4 - 102, bottom + 1, 84, 28)) {
+                if (inside(mouse_x, mouse_y, tools_x + 8, yy + 249, 34, 29) && sketch_brush > 1) sketch_brush--;
+                if (inside(mouse_x, mouse_y, tools_x + 52, yy + 249, 34, 29) && sketch_brush < 12) sketch_brush++;
+                if (inside(mouse_x, mouse_y, tools_x + 8, yy + 317, 105, 33)) undo_sketch();
+                if (inside(mouse_x, mouse_y, tools_x + 122, yy + 317, 105, 33)) redo_sketch();
+                if (inside(mouse_x, mouse_y, tools_x + 8, yy + 359, 105, 33)) {
                     snapshot_sketch();
-                    for (int row = 0; row < SKETCH_H; row++)
-                        for (int col = 0; col < SKETCH_W; col++) sketch_pixels[row][col] = 0;
+                    for (int row = 0; row < SKETCH_H; row++) for (int col = 0; col < SKETCH_W; col++) sketch_pixels[row][col] = 0;
+                    sketch_dirty = 1;
+                }
+                if (inside(mouse_x, mouse_y, tools_x + 122, yy + 359, 105, 33)) pinta_save_document();
+                int bottom = yy + (w->h - 36) - 44;
+                for (int k = 0; k < 8; k++) if (inside(mouse_x, mouse_y, xx + 18 + 41 * k, bottom, 29, 29)) sketch_color = k + 1;
+                if (cw < 900) {
+                    if (inside(mouse_x, mouse_y, xx + w->w - 4 - 199, bottom + 1, 85, 28)) undo_sketch();
+                    if (inside(mouse_x, mouse_y, xx + w->w - 4 - 102, bottom + 1, 84, 28)) {
+                        snapshot_sketch();
+                        for (int row = 0; row < SKETCH_H; row++) for (int col = 0; col < SKETCH_W; col++) sketch_pixels[row][col] = 0;
+                        sketch_dirty = 1;
+                    }
                 }
             }
             dirty = 1;
@@ -3145,6 +3308,7 @@ static void handle_mouse_byte(uint8_t b) {
         if (mouse_x <= 12) snap_window(a, -1);
         else if (mouse_x >= sw - 13) snap_window(a, 1);
     }
+    if (!press && left_down && active_window() == SKETCH) sketch_finish(mouse_x, mouse_y);
     if (!press) { drag_app = -1; resize_app = -1; }
     left_down = press;
 }
@@ -3287,6 +3451,9 @@ static void handle_key(uint8_t code) {
     }
     if (control_down && key >= 0x02 && key <= 0x08) { open_window(pinned_apps[key - 0x02]); return; }
     if (control_down && key == 0x13) { run_open = !run_open; if (run_open) { run_anim = 8; start_open = 0; context_open = 0; quick_open = 0; notification_open = 0; } dirty = 1; return; }
+    if (control_down && active_window() == SKETCH && key == 0x1f) { pinta_save_document(); return; }
+    if (control_down && active_window() == SKETCH && key == 0x2c) { undo_sketch(); return; }
+    if (control_down && active_window() == SKETCH && key == 0x15) { redo_sketch(); return; }
     if (control_down && key == 0x1f && active_window() == NOTES) { notes_commit(); return; }
     if (control_down && key == 0x31) { open_window(NOTES); return; }
     if (control_down && key == 0x2e) { open_window(CONSOLE); return; }
@@ -3496,14 +3663,16 @@ void kmain(void) {
             if (theme != 3) previous_theme = theme;
         }
         notes_select("notes.txt");
+        pinta_load_document();
+        sketch_disk_loaded = 1;
         files_restore();
         log_write("CinmixFS disk mounted at D: (ATA IDE)");
     } else log_write("RAM only: attach Cinmix disk to enable persistence");
-    log_write("Cinmix kernel 0.21 / protected user tasks");
+    log_write("Cinmix kernel 0.22 / protected user tasks");
     init_mouse();
     init_frame_clock();
     refresh_clock();
-    notify("Cinmix 0.21 is ready");
+    notify("Cinmix 0.22 is ready");
     repaint();
 #ifdef __i386__
     int cm_userspace_ready = cm_proc_initialize();
@@ -3514,8 +3683,9 @@ void kmain(void) {
     for (;;) {
         if ((++cycles & 16383u) == 0) refresh_clock();
 #ifdef __i386__
-        if (cm_userspace_ready && (cycles & 65535u) == 0) {
+        if (cm_userspace_ready && ((cycles & 65535u) == 0 || cm_paint_pending())) {
             cm_proc_run();
+            if (cm_paint_collect(&sketch_pixels[0][0], SKETCH_W * SKETCH_H)) dirty = 1;
             init_frame_clock();
         }
 #endif

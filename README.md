@@ -1,39 +1,46 @@
-# Cinmix 0.21 — Protected user mode and scheduling
+# Cinmix 0.22 — Protected Painter Worker and Native Pinta-Style App
 
-Cinmix is a freestanding 32-bit x86 desktop OS for legacy BIOS systems, with a 1920×1080 Aero desktop, persistent CinmixFS storage, NT-style file APIs and a new hardware privilege boundary.
+Cinmix is a freestanding 32-bit x86 hobby operating system for legacy BIOS El Torito boot, targeting a 1920×1080 desktop with Aero / Dark Aero, Notes, Explorer, Settings, and persistent CinmixFS storage.
 
-## What is implemented in 0.21
+## New in 0.22
 
-- **Real x86 protection levels:** A GDT with ring-0 and ring-3 code/data selectors, a 32-bit task-state segment (TSS) and kernel stack switching on entry to ring 0.
-- **Paging and address-space isolation:** Page Size Extensions (PSE) provide two independent 4 MiB ring-3 address spaces at virtual address `0x40000000`. Each maps to different physical memory. Kernel identity mappings are supervisor-only; ring-3 code cannot read the framebuffer, kernel or another task's data through those mappings. The kernel remains flat-mapped at ring 0.
-- **Preemptive user-task scheduling:** PIT channel 0 and IRQ0 (interrupt `0x20`) are configured for 100 Hz while a user slice runs. The scheduler saves complete 32-bit general-purpose and segment register contexts, rotates between two real ring-3 test tasks and resumes the ring-0 desktop between bounded execution slices. PIC interrupts are masked when the UI takes control again.
-- **Native system-call boundary:** An interrupt gate at `int 0x80` with DPL 3 accepts GetPid, GetTicks and Yield requests. Unknown calls fail with a status code rather than dereferencing kernel pointers.
-- **Privilege fault handling:** General protection (`#GP`) and page fault (`#PF`) handlers stop the offending test task instead of treating its error as a normal window exception. Console `faulttest` arms a deliberate privileged-instruction test. Console `userstat` reports task counters, user time slices, preemptions and system calls.
-- **Preserved 0.20 features:** Aero and Dark Aero, File Explorer, Settings, Notes, object manager, IRP-based file operations, CinmixFS ATA disk persistence, taskbar and window animations.
+### Protected painting worker (NT architecture milestone)
 
-## Exact scope and limitations
+The process manager's first ring-3 task now accepts bounded raster **stamp requests** through a per-process mailbox at virtual address `0x40002100`. The task paints into its isolated user-space buffer at `0x40010000` and signals completion; the ring-0 desktop validates and collects the result before composing the next frame. The mailbox validates coordinates, palette indices, and brush radius. A faulted or stopped worker is not used. Timer-based preemption, ring-3 pages, TSS stack transitions, and `int 0x80` from 0.21 remain in place.
 
-The two processes are **native ring-3 scheduler demonstration tasks**, not yet GUI applications. The existing desktop and built-in apps still execute inside one ring-0 address space. User-space processes do not yet load ELF/PE executables, create threads dynamically, map files, or use a full NT system-call interface. PSE large pages provide 4 MiB granularity rather than per-page read-only/write protection. This is not a replacement for the Windows NT kernel, nor does it run Win32 applications.
+**Scope:** This is an actual isolated user-mode painting operation, not an entire GUI process. The desktop, compositor, menus, shape geometry, mouse input and persistent file I/O are still handled in kernel mode. It does not implement a full NT process loader, Win32 API, or security model.
 
-The scheduler's PIT interrupts are active during short user-mode slices; the existing polled desktop regains control between slices. Kernel-mode activity is not yet preemptively scheduled. If the processor lacks PSE support, the desktop still starts without ring-3 scheduling.
+### Painting application replaces Sketch
 
-## Building
+The old Sketch application has been replaced by **a native Cinmix painter modeled on Pinta's basic workflow**, with a Pinta launcher label. Features include:
 
-Linux with GCC 32-bit compilation support, GNU binutils and Python 3:
+- Pencil, brush, eraser, line, rectangle and bucket-fill tools;
+- Adjustable brush radius, expanded color palette and a larger painting surface;
+- Undo, redo, and clear;
+- `Ctrl+S` and a Save button, storing the canvas as segmented `painting0.cmx` through `painting6.cmx` in the existing CinmixFS volume, accessed through Cinmix's NT-style file APIs;
+- Restoring a saved painting when the OS boots again with the same writable disk image.
+
+**Important compatibility distinction:** [Pinta](https://github.com/PintaProject/Pinta) itself is a .NET 10 / GTK4 / libadwaita application. That original binary and upstream C# interface **cannot run in Cinmix** today; this native C implementation is a **limited reimplementation, not the original Pinta executable or a full source port**. It does not include Pinta's complete tools, effects, layers, plugin infrastructure, GTK UI, or original artwork. The original project's license information and attribution are in `third_party/PINTA-LICENSE.txt` and `third_party/PINTA-SOURCE.txt`. No code or artwork from upstream Pinta is compiled into the kernel.
+
+## Persistence and disk compatibility
+
+The existing 16 MiB CinmixFS image format is unchanged. **Keep using your existing 0.18–0.21 disk image if it contains saved files.** Do not overwrite it with a blank image. This release's painting consumes **seven of the filesystem's sixteen 4 KiB slots**, leaving fewer available file slots for Notes and Explorer documents. Writes require a writable, signed CinmixFS disk; without one, paintings can be edited during the session but will not persist through reboot.
+
+## Build and verify
+
+On Linux with a C compiler supporting `-m32`, GNU binutils and Python 3:
 
 ```sh
 make verify
-make Cinmix-0.21-disk.img
+make Cinmix-0.22-disk.img
 ```
 
-The bootable ISO is `Cinmix-0.21.iso`. Attach a writable `Cinmix-0.21-disk.img` as primary IDE master for persistent files, or reuse your existing Cinmix 0.18 through 0.20 disk image. **Do not replace a disk image containing saved data with the blank release image.**
-
-Example QEMU command:
+The bootable ISO is `Cinmix-0.22.iso`. To test in QEMU with its persistent disk image:
 
 ```sh
-qemu-system-i386 -m 256 -vga std -cdrom Cinmix-0.21.iso -boot d -drive file=Cinmix-0.21-disk.img,format=raw,if=ide,index=0
+qemu-system-i386 -m 256 -vga std \
+  -cdrom Cinmix-0.22.iso -boot d \
+  -drive file=Cinmix-0.22-disk.img,format=raw,if=ide,index=0
 ```
 
-## Verification status
-
-`make verify` checks ISO9660/El Torito structures and machine-code symbols; native tests exercise page directory permissions, ring-3 interrupt-frame construction, simulated preemption and syscall dispatch, exception isolation, and all existing UI/NT I/O/storage regression suites. The model tests do **not** execute privileged instructions on real hardware. If no BIOS emulator is available, an actual ring-3 context switch and IRQ0 execution remains **unverified** and should be tested in a compatible VM before use with valuable data.
+The native regression suite tests the 1920×1080 compositor and desktop apps, protected page mapping and mailbox validation, brush results, painting tools, undo/redo, NT file calls, and save/reload through a **separate process**. ISO verifier checks BIOS boot structure and kernel instructions. **A full BIOS emulator boot and live hardware ring-3 paint execution are not verified in this environment.** Keep backups of important disk images.

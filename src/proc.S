@@ -113,17 +113,71 @@ cm_unhandled_stub:
     jmp 1b
 .align 16
 cm_user_binary_start:
-    mov edi, 0x40002000
     cmp eax, 1
     je cm_user_spin
+cm_user_paint_loop:
+    inc dword ptr [0x40002000]
+    mov esi, 0x40002100
+    cmp dword ptr [esi], 1
+    jne cm_user_yield
+    mov ebx, dword ptr [esi + 4]
+    mov ebp, dword ptr [esi + 8]
+    mov edx, dword ptr [esi + 12]
+    neg edx
+cm_user_paint_row:
+    mov ecx, dword ptr [esi + 12]
+    neg ecx
+cm_user_paint_column:
+    mov eax, ebx
+    add eax, ecx
+    cmp eax, 0
+    jl cm_user_paint_next
+    cmp eax, 224
+    jge cm_user_paint_next
+    mov eax, ebp
+    add eax, edx
+    cmp eax, 0
+    jl cm_user_paint_next
+    cmp eax, 110
+    jge cm_user_paint_next
+    mov eax, ecx
+    imul eax, eax
+    push eax
+    mov eax, edx
+    imul eax, eax
+    add eax, dword ptr [esp]
+    add esp, 4
+    push eax
+    mov eax, dword ptr [esi + 12]
+    imul eax, eax
+    add eax, dword ptr [esi + 12]
+    cmp dword ptr [esp], eax
+    lea esp, [esp + 4]
+    jg cm_user_paint_next
+    mov eax, ebp
+    add eax, edx
+    imul eax, eax, 224
+    add eax, ebx
+    add eax, ecx
+    push ecx
+    mov ecx, dword ptr [esi + 16]
+    mov byte ptr [0x40010000 + eax], cl
+    pop ecx
+cm_user_paint_next:
+    inc ecx
+    cmp ecx, dword ptr [esi + 12]
+    jle cm_user_paint_column
+    inc edx
+    cmp edx, dword ptr [esi + 12]
+    jle cm_user_paint_row
+    mov dword ptr [esi], 0
+    inc dword ptr [esi + 20]
 cm_user_yield:
-    inc dword ptr [edi]
-    mov eax, 1
-    int 0x80
     mov eax, 2
     int 0x80
-    jmp cm_user_yield
+    jmp cm_user_paint_loop
 cm_user_spin:
+    mov edi, 0x40002000
     inc dword ptr [edi]
     cmp dword ptr [edi + 4], 0
     jne cm_user_spin

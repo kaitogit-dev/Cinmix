@@ -191,6 +191,47 @@ uint32_t cm_proc_counter(int task) {
     return *value;
 }
 
+static CmPaintMailbox *cm_paint_mailbox(void) {
+    return (CmPaintMailbox *)(uintptr_t)(cm_user_tasks[0].physical_base + 0x2100u);
+}
+
+int cm_paint_pending(void) {
+    if (!cm_proc_ready || cm_user_tasks[0].state != CM_THREAD_READY) return 0;
+    return cm_paint_mailbox()->command == CM_PAINT_STAMP;
+}
+
+int cm_paint_submit(int x, int y, uint32_t color, uint32_t radius) {
+    if (!cm_proc_ready || cm_user_tasks[0].state != CM_THREAD_READY || x < 0 || y < 0 ||
+        x >= (int)CM_PAINT_WIDTH || y >= (int)CM_PAINT_HEIGHT || color > 255 || radius > 12) return 0;
+    CmPaintMailbox *box = cm_paint_mailbox();
+    if (box->command || box->completed) return 0;
+    box->x = x;
+    box->y = y;
+    box->color = color;
+    box->radius = radius;
+    __asm__ volatile("" ::: "memory");
+    box->command = CM_PAINT_STAMP;
+    return 1;
+}
+
+int cm_paint_collect(uint8_t *pixels, uint32_t count) {
+    if (!cm_proc_ready || cm_user_tasks[0].state != CM_THREAD_READY || !pixels ||
+        count != CM_PAINT_WIDTH * CM_PAINT_HEIGHT) return 0;
+    CmPaintMailbox *box = cm_paint_mailbox();
+    if (!box->completed || box->command) return 0;
+    const uint8_t *source = (const uint8_t *)(uintptr_t)(cm_user_tasks[0].physical_base + 0x10000u);
+    int x = box->x, y = box->y, radius = (int)box->radius;
+    for (int dy = -radius; dy <= radius; dy++) for (int dx = -radius; dx <= radius; dx++) {
+        int px = x + dx, py = y + dy;
+        if (px >= 0 && py >= 0 && px < (int)CM_PAINT_WIDTH && py < (int)CM_PAINT_HEIGHT && dx * dx + dy * dy <= radius * radius + radius) {
+            uint32_t index = (uint32_t)py * CM_PAINT_WIDTH + (uint32_t)px;
+            pixels[index] = source[index];
+        }
+    }
+    box->completed = 0;
+    return 1;
+}
+
 int cm_proc_enabled(void) { return cm_proc_ready; }
 
 int cm_proc_fault_demo(void) {
