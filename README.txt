@@ -1,3 +1,4 @@
-Cinmix 0.19 | BIOS i386 | 1920x1080 preferred
-Windows-inspired internals: app task IDs, generation-checked window and file handles, queued window messages with bounded dispatch, and a stream-oriented D: file API backed by persistent CinmixFS. Existing programs and the 0.18 disk format remain compatible.
-Attach Cinmix-0.19-disk.img as primary IDE master and keep the same image between boots. Use Console tasklist and handles commands to inspect OS objects.
+Cinmix 0.20 | i386 legacy BIOS | Full HD 1920x1080
+NT native file calls, IRP-based CinmixFS driver, NT object namespace,
+validated persistent registry, and generation-checked NT handles.
+Existing 0.18/0.19 disks remain compatible. No Windows binaries/drivers yet.

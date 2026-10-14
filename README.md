@@ -1,39 +1,42 @@
-# Cinmix 0.19 — Windows-inspired kernel internals
+# Cinmix 0.20 — NT-style kernel I/O and registry
 
-Cinmix is a freestanding 32-bit i386 desktop operating system with Aero and Dark Aero themes, a 1920×1080 preferred display and BIOS El Torito CD boot support. Version 0.19 preserves all 0.18 desktop features and adds **Windows-inspired infrastructure underneath the interface**.
+Cinmix is a freestanding 32-bit x86 operating system with the Aero and Dark Aero desktops, a preferred 1920×1080 display, BIOS El Torito boot support, and an optional persistent CinmixFS IDE hard disk.
 
-## What's new inside the OS
+## What 0.20 actually implements
 
-- **Task registry:** each of the ten built-in applications gets a stable session-local task ID (PID) and Running, Minimized, or Stopped state. A task is an application identity within the existing single-threaded kernel, **not a hardware-protected process**.
-- **Typed kernel handles:** windows and open files use generation-checked opaque 32-bit handles. A handle that is closed and whose slot has been reused is rejected rather than accidentally addressing the new object. The object table supports up to 32 live objects.
-- **Window message queue:** create, activate, close, minimize, paint, mouse, key and character messages are posted to a bounded queue with validated destination window handles. Duplicate paint messages are coalesced, and messages for destroyed windows are discarded. The main event loop pumps the queue with a fixed per-iteration budget. Notes and Console editing use the message dispatcher.
-- **File-handle API:** open, read, write, seek, flush and close operations on the `D:` drive sit between applications and the CinmixFS storage driver. Notes and Explorer create and save documents through these APIs rather than calling raw filesystem operations. Buffered writes commit through CinmixFS's existing copy-on-write directory and data-bank scheme.
-- **Diagnostics:** use `tasklist` in Console to see app PIDs and states, and `handles` to see allocated objects. The System app displays task and handle counts and whether a persistent disk is mounted; Windows shows a PID next to each running window.
+- **NT native file API subset**: `NtCreateFile`, `NtReadFile`, `NtWriteFile`, `NtFlushBuffersFile`, `NtQueryInformationFile`, and `NtClose`, using `NTSTATUS`, `IO_STATUS_BLOCK`, `UNICODE_STRING`, and `OBJECT_ATTRIBUTES` structures. `FILE_OPEN`, `FILE_CREATE`, `FILE_OPEN_IF`, and `FILE_OVERWRITE_IF` are supported for ordinary 8-bit Cinmix filenames within the existing 4 KB-per-file limit.
+- **I/O Manager and IRPs**: a `DRIVER_OBJECT` registers an IDE-backed CinmixFS `DEVICE_OBJECT`. File operations traverse `IoCallDriver`, IRP major-function dispatch, and the existing generation-checked Cinmix file backend. Unsupported requests return NT-style error statuses instead of silently succeeding.
+- **NT object namespace subset**: `\\Device\\CinmixDisk` with a DOS symbolic link `\\??\\D:`. Path resolution rejects unknown devices, traversal, and illegal filenames. New generation-checked NT file and registry handles prevent use-after-close.
+- **Registry API subset**: `NtCreateKey`, `NtOpenKey`, `NtSetValueKey`, and `NtQueryValueKey` for `\\Registry\\Machine\\Software\\Cinmix` and DWORD values. The Theme value is saved through the NT file APIs into a validated `system.reg` file on the persistent disk, and restored at boot. The registry file has a version and CRC and uses the existing copy-on-write CinmixFS mechanism.
+- **Real integration**: Notes and Explorer now create, read, write, flush, and close their files through the NT I/O layer, rather than reaching straight into CinmixFS. Console `handles` includes the NT handle count alongside the existing window object handles.
+- **Compatibility**: Existing CinmixFS 0.18/0.19 disk images retain their original on-disk layout and saved documents. The new registry file uses one of the existing 16 file slots. You can continue to use your current disk image; do not overwrite it with the blank example disk.
 
-This is **inspired by Windows architecture**, but it is **not Windows NT or a Win32 implementation**. It cannot run Windows executables. The kernel, apps and drivers still share a single address space and run cooperatively without per-process memory protection, preemptive scheduling, DLL loading, a registry, virtual memory or Windows drivers. Those would require much larger architectural changes.
+## Windows compatibility status
 
-## Disk compatibility
+This is a **limited implementation of real NT interface names, layouts, statuses, object paths, I/O request packets, and driver dispatch flow**. It is *not* a Windows NT kernel or a bit-for-bit copy of proprietary Windows code. It cannot load Windows drivers or run Windows executables. It has no Windows Registry hive (`regf`) compatibility, security access tokens, APC completion, kernel/user privilege separation, isolated processes, virtual memory, PE loader, preemptive scheduler, NTFS, or Win32 subsystem. The current kernel/apps still share one address space. Those require separate, much larger changes.
 
-**Keep your existing Cinmix 0.18 disk image** if it has saved data. Cinmix 0.19 uses the **same unmodified CinmixFS on-disk format**, including its signed superblock, fixed 16 file slots, 4 KiB per-file limit, and dual directory copies. The optional new `Cinmix-0.19-disk.img` is a blank 16 MiB image; do not overwrite your existing disk with it. Files created through the new handle API are persisted through the same ATA PIO driver.
+This release intentionally implements and tests its supported NT API paths rather than implying the unsupported components exist. The `system.reg` file is Cinmix's own private registry backing store, not a Windows hive.
 
-Use both boot media and one persistent IDE disk image:
+## Booting with a writable disk
+
+Use the ISO and **an existing writable disk image** containing your files, or the newly formatted blank disk image if you have no saved documents yet:
 
 ```bash
-qemu-system-i386 -m 256 -vga std -cdrom Cinmix-0.19.iso -boot d \
-  -drive file=Cinmix-0.19-disk.img,format=raw,if=ide,index=0
+qemu-system-i386 -m 256 -vga std -cdrom Cinmix-0.20.iso -boot d \
+  -drive file=Cinmix-0.20-disk.img,format=raw,if=ide,index=0
 ```
 
-The ISO alone still boots with a temporary RAM-only session. Cinmix never automatically formats an unknown attached drive. Make backups of writable disk images before testing an experimental OS.
+The hard disk must be presented as the primary IDE master and carry the CinmixFS signature. Cinmix will not automatically format an unknown disk. Without a supported disk, Cinmix boots in temporary RAM-only mode.
 
-## Build and verification
+## Building and testing
 
-On Linux with GCC including `-m32`, GNU binutils and Python 3:
+Requires GNU assembler, GCC (`-m32` support), GNU linker, objcopy, and Python 3.
 
 ```bash
 make verify
 make all
 ```
 
-Tests include the existing 720p and 1080p UI regressions, ISO boot-structure checks, disk persistence across separate native processes, and new tests of message ordering, paint coalescing, stale window/file handles, file seek/read/write/close, failed metadata commits, and Notes/Explorer saves through the file API. The clean-source rebuild should reproduce the ISO byte-for-byte.
+`make verify` checks the ISO9660/El Torito structure, the expanded CD sector loader, existing UI/animation and 1080p tests, save/restore of the original CinmixFS format, NT namespace and status validation, IRP routing, handle generation, registry persistence across distinct native processes, failed metadata recovery, and 1080p Notes/Explorer integration. A clean-source rebuild should match the ISO byte for byte.
 
-**A full BIOS-emulator boot and real IDE hardware interaction have not been verified in this environment.** Native mocks exercise the code and on-disk format, not QEMU/v86 real execution. The current file system has no directories or FAT/NTFS support, and the volume controls still need an audio driver.
+**Native tests are not a full BIOS emulator run.** Actual VBE and IDE operation in QEMU or v86 remains unverified here. Back up writable disk images before experimenting.

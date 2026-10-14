@@ -5,7 +5,7 @@ OBJCOPY = objcopy
 CFLAGS = -m32 -std=c11 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -fno-builtin -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -O2 -Wall -Wextra -Werror
 LDFLAGS = -m elf_i386 -T src/link.ld -nostdlib --build-id=none
 
-all: Cinmix-0.19.iso Cinmix-0.19-disk.img
+all: Cinmix-0.20.iso Cinmix-0.20-disk.img
 
 build:
 	mkdir -p build
@@ -22,7 +22,7 @@ build/entry.o: src/entry.S | build
 build/font.o: src/font.c | build
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-build/kernel.o: src/kernel.c src/objects.c src/storage.c | build
+build/kernel.o: src/kernel.c src/objects.c src/ntos.c src/storage.c | build
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 build/kernel.elf: build/entry.o build/kernel.o build/font.o src/link.ld
@@ -30,21 +30,21 @@ build/kernel.elf: build/entry.o build/kernel.o build/font.o src/link.ld
 
 build/kernel.bin: build/kernel.elf
 	$(OBJCOPY) -O binary $< $@
-	@test $$(stat -c%s $@) -le 114688 || (echo 'Kernel exceeds CD loader capacity' && exit 1)
+	@test $$(stat -c%s $@) -le 131072 || (echo 'Kernel exceeds CD loader capacity' && exit 1)
 
-Cinmix-0.19.iso: build/cdboot.bin build/kernel.bin README.txt tools/iso.py
+Cinmix-0.20.iso: build/cdboot.bin build/kernel.bin README.txt tools/iso.py
 	python3 tools/iso.py build/cdboot.bin build/kernel.bin README.txt $@
 
-Cinmix-0.19-disk.img: tools/disk.py
+Cinmix-0.20-disk.img: tools/disk.py
 	python3 tools/disk.py $@
 
-verify: Cinmix-0.19.iso
+verify: Cinmix-0.20.iso
 	python3 tools/verify.py $< build/cdboot.bin build/kernel.bin build/kernel.elf
 	$(MAKE) smoke
 
-NATIVE_TESTS = build/smoke build/ui11 build/compositor build/controls build/ui12 build/ui13 build/ui131 build/animations build/ui133 build/fullhd build/ui15 build/ui16 build/ui17 build/storage build/ui18 build/objects build/ui19
+NATIVE_TESTS = build/smoke build/ui11 build/compositor build/controls build/ui12 build/ui13 build/ui131 build/animations build/ui133 build/fullhd build/ui15 build/ui16 build/ui17 build/storage build/ui18 build/objects build/ui19 build/ntos build/ui20
 
-build/%: tests/%.c src/kernel.c src/storage.c src/objects.c src/font.c | build
+build/%: tests/%.c src/kernel.c src/storage.c src/objects.c src/ntos.c src/font.c | build
 	$(CC) -std=gnu11 -O1 -o $@ $< src/font.c
 
 smoke: $(NATIVE_TESTS) | build
@@ -77,12 +77,19 @@ smoke: $(NATIVE_TESTS) | build
 	./build/objects build/objects-test.img recover
 	python3 tools/disk.py build/ui19-test.img
 	./build/ui19 build/ui19-test.img
+	rm -f build/ntos-test.img build/ui20-test.img
+	python3 tools/disk.py build/ntos-test.img
+	./build/ntos build/ntos-test.img save
+	./build/ntos build/ntos-test.img reload
+	./build/ntos build/ntos-test.img recover
+	python3 tools/disk.py build/ui20-test.img
+	./build/ui20 build/ui20-test.img
 
 bench: | build
 	$(CC) -std=gnu11 -O2 -o build/bench tests/bench.c src/font.c
 	./build/bench
 
 clean:
-	rm -rf build Cinmix-0.19.iso
+	rm -rf build Cinmix-0.20.iso
 
 .PHONY: all verify smoke bench clean

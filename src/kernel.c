@@ -261,6 +261,7 @@ static inline void out8(uint16_t port, uint8_t value) {
 
 #include "storage.c"
 #include "objects.c"
+#include "ntos.c"
 
 static int same(const char *a, const char *b) {
     while (*a && *b && *a == *b) { a++; b++; }
@@ -377,6 +378,7 @@ static void select_theme(int selected) {
     if (selected != 3) previous_theme = selected;
     if (theme == selected) return;
     theme = selected;
+    nt_save_theme((uint32_t)theme);
     dirty = 1;
     taskbar_dirty = 1;
 }
@@ -532,10 +534,18 @@ static void animated_window_rect(int app, int *x, int *y, int *w, int *h);
 static void notes_commit(void) {
     if (!notes_dirty) return;
     if (storage_ready) {
-        uint32_t handle = cm_file_open(NOTES, notes_filename, CM_OPEN_WRITE | CM_OPEN_CREATE | CM_OPEN_TRUNCATE);
-        int saved = handle && cm_file_seek(handle, 0) && cm_file_write(handle, notes, notes_len) == notes_len && cm_file_close(handle);
-        if (handle && !saved) cm_file_abort(handle);
-        if (saved) { notes_dirty = 0; notes_save_failed = 0; }
+        HANDLE handle = 0;
+        char path[48] = "\\??\\D:\\";
+        append(path, notes_filename, sizeof(path));
+        IO_STATUS_BLOCK io = {0};
+        NTSTATUS status = nt_open_ascii(&handle, path, FILE_WRITE_DATA, FILE_OVERWRITE_IF);
+        if (NT_SUCCESS(status)) status = NtWriteFile(handle, 0, NULL, NULL, &io, notes, (uint32_t)notes_len, NULL, NULL);
+        if (NT_SUCCESS(status)) status = NtFlushBuffersFile(handle, &io);
+        if (handle) {
+            if (NT_SUCCESS(status)) status = NtClose(handle);
+            else nt_file_abort(handle);
+        }
+        if (NT_SUCCESS(status)) { notes_dirty = 0; notes_save_failed = 0; }
         else notes_save_failed = 1;
     }
     dirty = 1;
@@ -550,11 +560,19 @@ static int notes_select(const char *name) {
     notes_len = 0;
     notes[0] = 0;
     if (storage_ready) {
-        uint32_t handle = cm_file_open(NOTES, notes_filename, CM_OPEN_READ);
-        if (handle) {
-            int loaded = cm_file_read(handle, notes, sizeof(notes) - 1);
-            if (loaded >= 0) { notes_len = loaded; notes[notes_len] = 0; }
-            cm_file_close(handle);
+        HANDLE handle = 0;
+        char path[48] = "\\??\\D:\\";
+        append(path, notes_filename, sizeof(path));
+        if (NT_SUCCESS(nt_open_ascii(&handle, path, FILE_READ_DATA, FILE_OPEN))) {
+            IO_STATUS_BLOCK io = {0};
+            FILE_STANDARD_INFORMATION info;
+            NtQueryInformationFile(handle, &io, &info, sizeof(info), NT_FILE_STANDARD_INFORMATION);
+            NTSTATUS status = NtReadFile(handle, 0, NULL, NULL, &io, notes, sizeof(notes) - 1, NULL, NULL);
+            if (NT_SUCCESS(status) || status == STATUS_END_OF_FILE) {
+                notes_len = (int)io.Information;
+                notes[notes_len] = 0;
+            }
+            NtClose(handle);
         }
     }
     notes_dirty = 0;
@@ -1203,7 +1221,7 @@ static void execute_command(void) {
     log_write(linebuf);
     if (!console_len) return;
     if (same(console_input, "help")) print_info();
-    else if (same(console_input, "ver")) log_write("Cinmix 0.19  |  kernel 0.19  |  i386");
+    else if (same(console_input, "ver")) log_write("Cinmix 0.20  |  kernel 0.20  |  i386");
     else if (same(console_input, "clear")) log_count = 0;
     else if (same(console_input, "context")) log_write("Right click on desktop");
     else if (same(console_input, "dark")) { select_theme(3); log_write("Dark Aero enabled"); }
@@ -1216,7 +1234,7 @@ static void execute_command(void) {
         log_write("/ram/readme.txt");
         log_write("/ram/boot.log");
         log_write("/ram/notes.txt");
-    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix 0.19; persistent D: requires CinmixFS disk");
+    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix 0.20; persistent D: requires CinmixFS disk");
     else if (same(console_input, "cat boot.log")) log_write("El Torito -> kernel -> protected mode -> UI");
     else if (same(console_input, "cat notes.txt")) {
         char one[72] = "";
@@ -1230,6 +1248,8 @@ static void execute_command(void) {
     else if (same(console_input, "handles")) {
         char line[72] = "Kernel handles in use: ", n[12];
         number(n, (uint32_t)cm_handle_count()); append(line, n, 72);
+        append(line, " / NT: ", 72);
+        number(n, (uint32_t)nt_open_handle_count()); append(line, n, 72);
         log_write(line);
     }
     else if (same(console_input, "tasklist")) {
@@ -1469,7 +1489,7 @@ static void files_restore(void) {
     char name[24];
     for (int k = 0; k < STORAGE_SLOTS && file_created < 3; k++) {
         if (!cm_file_list(k, name)) break;
-        if (same(name, "notes.txt")) continue;
+        if (same(name, "notes.txt") || same(name, "system.reg")) continue;
         copy(file_extra_names[file_created++], name, 24);
     }
 }
@@ -1539,11 +1559,15 @@ static int files_action(const Window *w, int px, int py) {
     if (inside(px, py, x + 24, y + 15, 60, 24)) {
         if (file_created < 3) {
             const char *name = file_extra_names[file_created];
-            uint32_t handle = storage_ready ? cm_file_open(FILES, name, CM_OPEN_WRITE | CM_OPEN_CREATE | CM_OPEN_TRUNCATE) : 0;
-            if (!storage_ready || (handle && cm_file_close(handle))) {
+            HANDLE handle = 0;
+            char path[48] = "\\??\\D:\\";
+            append(path, name, sizeof(path));
+            NTSTATUS status = storage_ready ? nt_open_ascii(&handle, path, FILE_WRITE_DATA, FILE_OVERWRITE_IF) : STATUS_SUCCESS;
+            if (handle && NT_SUCCESS(status)) status = NtClose(handle);
+            if (NT_SUCCESS(status)) {
                 selected_file = FILE_COUNT + file_created++;
                 file_location = 6; file_search_len = 0; file_search[0] = 0;
-            } else { if (handle) cm_file_abort(handle); notify("Disk write failed"); }
+            } else { if (handle) nt_file_abort(handle); notify("Disk write failed"); }
         }
         file_search_focus = 0; return 1;
     }
@@ -1782,10 +1806,10 @@ static void window_content(int app, const Window *w) {
     } else if (app == SYSTEM) {
         rect(x, y, cw, 4, BLUE);
         big_text(x + 21, y + 22, "CINMIX", INK);
-        text(x + 24, y + 62, "RELEASE 0.19", STEEL);
+        text(x + 24, y + 62, "RELEASE 0.20", STEEL);
         rect(x + 21, y + 91, cw - 42, 1, HAIR);
         text(x + 24, y + 106, "Kernel", STEEL);
-        text(x + 166, y + 106, "Cinmix 0.19", INK);
+        text(x + 166, y + 106, "Cinmix 0.20", INK);
         text(x + 24, y + 134, "Target", STEEL);
         text(x + 166, y + 134, "i386 protected", INK);
         text(x + 24, y + 162, "Firmware", STEEL);
@@ -1811,6 +1835,12 @@ static void window_content(int app, const Window *w) {
         int tasks = 0; for (int i = 0; i < APPS; i++) if (cm_tasks[i].state) tasks++;
         number(objects, (uint32_t)tasks);
         text(x + 166, y + 330, objects, INK);
+        text(x + 24, y + 358, "NT I/O Manager", STEEL);
+        text(x + 166, y + 358, nt_driver_ready ? "IRP / CinmixFS" : "Not initialized", INK);
+        text(x + 24, y + 386, "Device namespace", STEEL);
+        text(x + 166, y + 386, "\\Device\\CinmixDisk", INK);
+        text(x + 24, y + 414, "Registry", STEEL);
+        text(x + 166, y + 414, nt_registry_loaded ? "HKLM / Software / Cinmix" : "Available on D:", INK);
     } else if (app == CLOCK) {
         rect(x, y, cw, 4, BLUE);
         text(x + 22, y + 30, "SYSTEM RTC", STEEL);
@@ -1834,7 +1864,7 @@ static void window_content(int app, const Window *w) {
             text(x + 55, yy + 9, pages[k], settings_page == k ? INK : INK2);
         }
         rect(x + 22, y + ch - 75, nw - 20, 1, HAIR);
-        text(x + 27, y + ch - 57, "Cinmix 0.19", STEEL);
+        text(x + 27, y + ch - 57, "Cinmix 0.20", STEEL);
         text(x + 27, y + ch - 37, "1920 x 1080", STEEL);
         big_text(mx, y + 18, pages[settings_page], INK);
         if (settings_page == 1) {
@@ -1928,7 +1958,7 @@ static void window_content(int app, const Window *w) {
         } else {
             text(mx + 2, y + 61, "About Cinmix", STEEL);
             rounded(mx, y + 93, mw, 222, 12, UI_CARD);
-            big_text(mx + 20, y + 116, "Cinmix 0.19", INK);
+            big_text(mx + 20, y + 116, "Cinmix 0.20", INK);
             text(mx + 23, y + 162, "32-bit i386 operating system", STEEL);
             text(mx + 23, y + 193, "Legacy BIOS / El Torito boot", STEEL);
             text(mx + 23, y + 224, "Aero desktop with Dark Aero", STEEL);
@@ -3424,16 +3454,23 @@ void kmain(void) {
         }
     }
     notes_len = size(notes);
+    NtInitializeIoManager();
     if (storage_mount()) {
+        nt_registry_load();
+        int loaded_theme = 0;
+        if (nt_restore_theme(&loaded_theme)) {
+            theme = loaded_theme;
+            if (theme != 3) previous_theme = theme;
+        }
         notes_select("notes.txt");
         files_restore();
         log_write("CinmixFS disk mounted at D: (ATA IDE)");
     } else log_write("RAM only: attach Cinmix disk to enable persistence");
-    log_write("Cinmix kernel 0.19  [i386]");
+    log_write("Cinmix kernel 0.20 / NT I-O layer");
     init_mouse();
     init_frame_clock();
     refresh_clock();
-    notify("Cinmix 0.19 is ready");
+    notify("Cinmix 0.20 is ready");
     repaint();
     uint32_t cycles = 0;
     for (;;) {
