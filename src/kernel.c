@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stddef.h>
+#include "proc.h"
 
 extern uint32_t boot_fb;
 extern uint16_t boot_pitch;
@@ -1221,7 +1222,7 @@ static void execute_command(void) {
     log_write(linebuf);
     if (!console_len) return;
     if (same(console_input, "help")) print_info();
-    else if (same(console_input, "ver")) log_write("Cinmix 0.20  |  kernel 0.20  |  i386");
+    else if (same(console_input, "ver")) log_write("Cinmix 0.21  |  kernel 0.21  |  i386");
     else if (same(console_input, "clear")) log_count = 0;
     else if (same(console_input, "context")) log_write("Right click on desktop");
     else if (same(console_input, "dark")) { select_theme(3); log_write("Dark Aero enabled"); }
@@ -1234,7 +1235,7 @@ static void execute_command(void) {
         log_write("/ram/readme.txt");
         log_write("/ram/boot.log");
         log_write("/ram/notes.txt");
-    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix 0.20; persistent D: requires CinmixFS disk");
+    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix 0.21; persistent D: requires CinmixFS disk");
     else if (same(console_input, "cat boot.log")) log_write("El Torito -> kernel -> protected mode -> UI");
     else if (same(console_input, "cat notes.txt")) {
         char one[72] = "";
@@ -1261,6 +1262,32 @@ static void execute_command(void) {
             log_write(line);
         }
     }
+#ifdef __i386__
+    else if (same(console_input, "userstat")) {
+        char line[72] = "Protected ring 3 tasks: ", n[12];
+        number(n, cm_proc_active_tasks()); append(line, n, 72);
+        append(line, " / slices ", 72);
+        number(n, cm_user_slices); append(line, n, 72);
+        log_write(line);
+        line[0] = 0; append(line, "Preemptions ", 72);
+        number(n, cm_preemptions); append(line, n, 72);
+        append(line, " / syscalls ", 72);
+        number(n, cm_user_syscalls); append(line, n, 72);
+        log_write(line);
+        for (int i = 0; i < CM_USER_COUNT; i++) {
+            line[0] = 0;
+            append(line, "PID ", 72);
+            number(n, cm_user_tasks[i].pid); append(line, n, 72);
+            append(line, "  counter ", 72);
+            number(n, cm_proc_counter(i)); append(line, n, 72);
+            append(line, cm_user_tasks[i].state == CM_THREAD_READY ? " running" : " faulted", 72);
+            log_write(line);
+        }
+    }
+    else if (same(console_input, "faulttest")) {
+        log_write(cm_proc_fault_demo() ? "Ring 3 privilege fault queued" : "Privilege fault test unavailable");
+    }
+#endif
     else if (same(console_input, "cpu")) log_write(cpu_vendor);
     else if (same(console_input, "date")) { log_write(clock_date); log_write(clock_time); }
     else if (same(console_input, "screen")) {
@@ -1806,10 +1833,10 @@ static void window_content(int app, const Window *w) {
     } else if (app == SYSTEM) {
         rect(x, y, cw, 4, BLUE);
         big_text(x + 21, y + 22, "CINMIX", INK);
-        text(x + 24, y + 62, "RELEASE 0.20", STEEL);
+        text(x + 24, y + 62, "RELEASE 0.21", STEEL);
         rect(x + 21, y + 91, cw - 42, 1, HAIR);
         text(x + 24, y + 106, "Kernel", STEEL);
-        text(x + 166, y + 106, "Cinmix 0.20", INK);
+        text(x + 166, y + 106, "Cinmix 0.21", INK);
         text(x + 24, y + 134, "Target", STEEL);
         text(x + 166, y + 134, "i386 protected", INK);
         text(x + 24, y + 162, "Firmware", STEEL);
@@ -1841,6 +1868,12 @@ static void window_content(int app, const Window *w) {
         text(x + 166, y + 386, "\\Device\\CinmixDisk", INK);
         text(x + 24, y + 414, "Registry", STEEL);
         text(x + 166, y + 414, nt_registry_loaded ? "HKLM / Software / Cinmix" : "Available on D:", INK);
+#ifdef __i386__
+        if (ch >= 472) {
+            text(x + 24, y + 443, "User processes", STEEL);
+            text(x + 166, y + 443, cm_proc_enabled() ? "Ring 3 / paged / PIT scheduled" : "PSE unavailable", INK);
+        }
+#endif
     } else if (app == CLOCK) {
         rect(x, y, cw, 4, BLUE);
         text(x + 22, y + 30, "SYSTEM RTC", STEEL);
@@ -1864,7 +1897,7 @@ static void window_content(int app, const Window *w) {
             text(x + 55, yy + 9, pages[k], settings_page == k ? INK : INK2);
         }
         rect(x + 22, y + ch - 75, nw - 20, 1, HAIR);
-        text(x + 27, y + ch - 57, "Cinmix 0.20", STEEL);
+        text(x + 27, y + ch - 57, "Cinmix 0.21", STEEL);
         text(x + 27, y + ch - 37, "1920 x 1080", STEEL);
         big_text(mx, y + 18, pages[settings_page], INK);
         if (settings_page == 1) {
@@ -1958,7 +1991,7 @@ static void window_content(int app, const Window *w) {
         } else {
             text(mx + 2, y + 61, "About Cinmix", STEEL);
             rounded(mx, y + 93, mw, 222, 12, UI_CARD);
-            big_text(mx + 20, y + 116, "Cinmix 0.20", INK);
+            big_text(mx + 20, y + 116, "Cinmix 0.21", INK);
             text(mx + 23, y + 162, "32-bit i386 operating system", STEEL);
             text(mx + 23, y + 193, "Legacy BIOS / El Torito boot", STEEL);
             text(mx + 23, y + 224, "Aero desktop with Dark Aero", STEEL);
@@ -3466,15 +3499,26 @@ void kmain(void) {
         files_restore();
         log_write("CinmixFS disk mounted at D: (ATA IDE)");
     } else log_write("RAM only: attach Cinmix disk to enable persistence");
-    log_write("Cinmix kernel 0.20 / NT I-O layer");
+    log_write("Cinmix kernel 0.21 / protected user tasks");
     init_mouse();
     init_frame_clock();
     refresh_clock();
-    notify("Cinmix 0.20 is ready");
+    notify("Cinmix 0.21 is ready");
     repaint();
+#ifdef __i386__
+    int cm_userspace_ready = cm_proc_initialize();
+    if (cm_userspace_ready) log_write("Paged ring 3 tasks and PIT preemption enabled");
+    else log_write("PSE unavailable: ring 3 tasks disabled");
+#endif
     uint32_t cycles = 0;
     for (;;) {
         if ((++cycles & 16383u) == 0) refresh_clock();
+#ifdef __i386__
+        if (cm_userspace_ready && (cycles & 65535u) == 0) {
+            cm_proc_run();
+            init_frame_clock();
+        }
+#endif
         for (int step = 0; step < 64; step++) {
             uint8_t status = in8(0x64);
             if (!(status & 1)) break;

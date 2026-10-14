@@ -67,8 +67,20 @@ def check(iso_path, boot_path, kernel_path, elf_path):
     assert b'\xc7\x06\x14\x72\x00\x1e' in kernel
     assert b'\xb8\x80\x07' in kernel[:512]
     assert b'\xb8\x38\x04' in kernel[:512]
-    assert b'CINMIX_0_20' in sector(16)
-    assert b'CINMIX 0.20' in entry
+    assert b'CINMIX_0_21' in sector(16)
+    assert b'CINMIX 0.21' in entry
+    for symbol in ('cm_enter_userspace', 'cm_irq0_stub', 'cm_syscall_stub',
+                   'cm_gp_stub', 'cm_pf_stub', 'cm_proc_initialize',
+                   'cm_proc_interrupt', 'cm_user_binary_start', 'cm_user_binary_end'):
+        assert symbol in symbols, f'Missing protected-mode process symbol: {symbol}'
+    user_binary_start = symbols['cm_user_binary_start'] - 0x10000
+    user_binary_end = symbols['cm_user_binary_end'] - 0x10000
+    assert 0 < user_binary_end - user_binary_start <= 4096
+    assert b'\xcd\x80' in kernel[user_binary_start:user_binary_end]
+    assert b'\xfa' in kernel[user_binary_start:user_binary_end]
+    assert b'\x0f\x22\xd8' in kernel or b'\x0f\x22\xc3' in kernel
+    assert b'\xcf' in kernel[symbols['cm_enter_userspace'] - 0x10000:
+                             symbols['cm_user_binary_start'] - 0x10000]
 
     folder = sector(22)
     names = []
@@ -86,6 +98,7 @@ def check(iso_path, boot_path, kernel_path, elf_path):
     print('PASS: BIOS CD boot stage and DAP address operand')
     print('PASS: Protected mode kernel entry and BSS initialization operands')
     print('PASS: 1920x1080x32 VBE/Bochs mode-selection instructions and 7680-byte pitch')
+    print('PASS: ring-3 IRET, CR3 switching, syscall gate, timer IRQ and protection-fault stubs')
     print(f'ISO: {len(iso)} bytes')
     print(f'KERNEL: {len(kernel)} bytes')
 
