@@ -64,9 +64,9 @@ int main(void) {
     timer_counter = 50000;
     timer_accum = 0;
     timer_unchanged = 0;
-    check(!advance_frame_counter(40000));
+    check(!advance_frame_counter(42000));
     check(advance_frame_counter(30000));
-    check(timer_accum < 19886);
+    check(timer_accum < 9943);
     timer_counter = 100;
     timer_accum = 0;
     check(!advance_frame_counter(65000));

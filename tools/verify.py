@@ -61,6 +61,13 @@ def check(iso_path, boot_path, kernel_path, elf_path):
     assert iso[(boot_lba + 1) * SECTOR:(boot_lba + 1) * SECTOR + len(kernel)] == kernel
     assert iso[(boot_lba + 1) * SECTOR + len(kernel):(boot_lba + 49) * SECTOR] == bytes(48 * SECTOR - len(kernel))
     assert b'\x21\x00\x00\x00\x00\x00\x00\x00' in boot
+    assert b'\xc7\x06\x16\x72\x80\x07' in kernel
+    assert b'\xc7\x06\x18\x72\x38\x04' in kernel
+    assert b'\xc7\x06\x14\x72\x00\x1e' in kernel
+    assert b'\xb8\x80\x07' in kernel[:512]
+    assert b'\xb8\x38\x04' in kernel[:512]
+    assert b'CINMIX_0_14' in sector(16)
+    assert b'CINMIX 0.14' in entry
 
     folder = sector(22)
     names = []
@@ -77,6 +84,7 @@ def check(iso_path, boot_path, kernel_path, elf_path):
     print('PASS: SeaBIOS El Torito identifier and boot catalog checks')
     print('PASS: BIOS CD boot stage and DAP address operand')
     print('PASS: Protected mode kernel entry and BSS initialization operands')
+    print('PASS: 1920x1080x32 VBE/Bochs mode-selection instructions and 7680-byte pitch')
     print(f'ISO: {len(iso)} bytes')
     print(f'KERNEL: {len(kernel)} bytes')
 

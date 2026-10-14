@@ -44,26 +44,31 @@ search_mode:
     jne next_mode
     cmp word ptr [di+18], 640
     jb next_mode
-    cmp word ptr [di+18], 1280
+    cmp word ptr [di+18], 1920
     ja next_mode
     cmp word ptr [di+20], 480
     jb next_mode
-    cmp word ptr [di+20], 900
+    cmp word ptr [di+20], 1080
     ja next_mode
-    cmp word ptr [chosen_mode], 0
+    cmp word ptr [di+18], 1920
+    jne maybe_preferred
+    cmp word ptr [di+20], 1080
     jne maybe_preferred
     call store_mode
+    jmp enable_vbe
 maybe_preferred:
     cmp word ptr [di+18], 1280
     jne maybe_standard
     cmp word ptr [di+20], 720
     jne maybe_standard
     call store_mode
-    jmp enable_vbe
+    jmp next_mode
 maybe_standard:
     cmp word ptr [di+18], 800
     jne next_mode
     cmp word ptr [di+20], 600
+    jne next_mode
+    cmp word ptr [chosen_mode], 0
     jne next_mode
     call store_mode
 next_mode:
@@ -71,7 +76,7 @@ next_mode:
     cmp bx, 0x1ff
     jbe search_mode
 enable_vbe:
-    call try_bochs_720p
+    call try_bochs_1080p
     test ax, ax
     jnz switch_mode
     cmp word ptr [chosen_mode], 0
@@ -90,7 +95,8 @@ fallback:
     mov word ptr [boot_width], 320
     mov word ptr [boot_height], 200
     mov byte ptr [boot_bpp], 8
-try_bochs_720p:
+    jmp switch_mode
+try_bochs_1080p:
     mov dx, 0x01ce
     xor ax, ax
     out dx, ax
@@ -110,13 +116,13 @@ try_bochs_720p:
     mov ax, 1
     out dx, ax
     mov dx, 0x01cf
-    mov ax, 1280
+    mov ax, 1920
     out dx, ax
     mov dx, 0x01ce
     mov ax, 2
     out dx, ax
     mov dx, 0x01cf
-    mov ax, 720
+    mov ax, 1080
     out dx, ax
     mov dx, 0x01ce
     mov ax, 3
@@ -129,14 +135,14 @@ try_bochs_720p:
     out dx, ax
     mov dx, 0x01cf
     in ax, dx
-    cmp ax, 1280
+    cmp ax, 1920
     jne bochs_unavailable
     mov dx, 0x01ce
     mov ax, 2
     out dx, ax
     mov dx, 0x01cf
     in ax, dx
-    cmp ax, 720
+    cmp ax, 1080
     jne bochs_unavailable
     mov dx, 0x01ce
     mov ax, 3
@@ -152,9 +158,9 @@ try_bochs_720p:
     mov ax, 0x41
     out dx, ax
     mov dword ptr [boot_fb], 0xe0000000
-    mov word ptr [boot_pitch], 5120
-    mov word ptr [boot_width], 1280
-    mov word ptr [boot_height], 720
+    mov word ptr [boot_pitch], 7680
+    mov word ptr [boot_width], 1920
+    mov word ptr [boot_height], 1080
     mov byte ptr [boot_bpp], 32
     mov ax, 1
     ret

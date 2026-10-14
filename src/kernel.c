@@ -45,9 +45,9 @@ static const uint32_t palette[3][13] = {
 #define CALENDAR 8
 #define WINDOWS_APP 9
 #define APPS 10
-#define WINDOW_OPEN_STEPS 4
-#define WINDOW_RESIZE_STEPS 5
-#define WINDOW_CLOSE_STEPS 7
+#define WINDOW_OPEN_STEPS 3
+#define WINDOW_RESIZE_STEPS 4
+#define WINDOW_CLOSE_STEPS 5
 #define SKETCH_W 224
 #define SKETCH_H 110
 #define CURSOR_W 22
@@ -140,7 +140,7 @@ static int last_tab_selected;
 #define PANEL_SWITCHER 5
 #define PANEL_TOOLTIP 6
 #define PANEL_COUNT 7
-#define PANEL_STEPS 8
+#define PANEL_STEPS 6
 static uint8_t panel_step[PANEL_COUNT];
 static uint8_t panel_goal[PANEL_COUNT];
 static uint8_t panel_was_visible[PANEL_COUNT];
@@ -490,9 +490,9 @@ static void animated_window_rect(int app, int *x, int *y, int *w, int *h) {
     if (anim_ticks[app] > 0) {
         int phase = anim_total[app] - anim_ticks[app];
         int to_x = anim_exit[app] ? anim_x0[app] + anim_w0[app] / 7 : windows[app].x;
-        int to_y = anim_exit[app] ? anim_y0[app] + 42 : windows[app].y;
-        int to_w = anim_exit[app] ? anim_w0[app] * 5 / 7 : windows[app].w;
-        int to_h = anim_exit[app] ? anim_h0[app] * 4 / 5 : windows[app].h;
+        int to_y = anim_exit[app] ? anim_y0[app] + 24 : windows[app].y;
+        int to_w = anim_exit[app] ? anim_w0[app] * 6 / 7 : windows[app].w;
+        int to_h = anim_exit[app] ? anim_h0[app] * 9 / 10 : windows[app].h;
         *x = tween_value(anim_x0[app], to_x, phase, anim_total[app]);
         *y = tween_value(anim_y0[app], to_y, phase, anim_total[app]);
         *w = tween_value(anim_w0[app], to_w, phase, anim_total[app]);
@@ -786,7 +786,8 @@ static void draw_icon(int x, int y, int id) {
 static const int desk_shortcuts[8] = {FILES, NOTES, CONSOLE, SKETCH, CALENDAR, APPEAR, CLOCK, CALC};
 
 static void desktop_position(int slot, int *x, int *y) {
-    if (sw >= 600) { *x = 18 + (slot / 4) * 96; *y = 17 + (slot % 4) * 76; }
+    if (sw >= 1700) { *x = 24 + (slot / 4) * 116; *y = 25 + (slot % 4) * 96; }
+    else if (sw >= 600) { *x = 18 + (slot / 4) * 96; *y = 17 + (slot % 4) * 76; }
     else { *x = 7 + (slot % 4) * 77; *y = 9 + (slot / 4) * 62; }
 }
 
@@ -1065,7 +1066,7 @@ static void execute_command(void) {
     log_write(linebuf);
     if (!console_len) return;
     if (same(console_input, "help")) print_info();
-    else if (same(console_input, "ver")) log_write("Cinmix 0.13.3  |  kernel 0.13.3  |  i386");
+    else if (same(console_input, "ver")) log_write("Cinmix 0.14  |  kernel 0.14  |  i386");
     else if (same(console_input, "clear")) log_count = 0;
     else if (same(console_input, "context")) log_write("Right click on desktop");
     else if (same(console_input, "resize")) log_write("Drag window lower-right corner");
@@ -1075,7 +1076,7 @@ static void execute_command(void) {
         log_write("/ram/readme.txt");
         log_write("/ram/boot.log");
         log_write("/ram/notes.txt");
-    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix kernel 0.13.3; El Torito; RAM volume");
+    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix kernel 0.14; El Torito; RAM volume");
     else if (same(console_input, "cat boot.log")) log_write("El Torito -> kernel -> protected mode -> UI");
     else if (same(console_input, "cat notes.txt")) {
         char one[72] = "";
@@ -1356,7 +1357,7 @@ static void window_content(int app, const Window *w) {
         rect(x + 137, yy, cw - 150, 1, HAIR);
         text(x + 146, yy + 11, "PREVIEW", STEEL);
         if (selected_file == 0) {
-            text(x + 146, yy + 36, "Cinmix 0.13.3", INK);
+            text(x + 146, yy + 36, "Cinmix 0.14", INK);
             text(x + 146, yy + 57, "i386 / El Torito CD", STEEL);
         } else if (selected_file == 1) {
             text(x + 146, yy + 36, "Protected mode", INK);
@@ -1413,10 +1414,10 @@ static void window_content(int app, const Window *w) {
     } else if (app == SYSTEM) {
         rect(x, y, cw, 4, BLUE);
         big_text(x + 21, y + 22, "CINMIX", INK);
-        text(x + 24, y + 62, "RELEASE 0.13.3", STEEL);
+        text(x + 24, y + 62, "RELEASE 0.14", STEEL);
         rect(x + 21, y + 91, cw - 42, 1, HAIR);
         text(x + 24, y + 106, "Kernel", STEEL);
-        text(x + 166, y + 106, "Cinmix 0.13.3", INK);
+        text(x + 166, y + 106, "Cinmix 0.14", INK);
         text(x + 24, y + 134, "Target", STEEL);
         text(x + 166, y + 134, "i386 protected", INK);
         text(x + 24, y + 162, "Firmware", STEEL);
@@ -1575,13 +1576,26 @@ static void window_content(int app, const Window *w) {
     int focused = active_window() == i;
     soft_shadow(x, y, ww, hh, 16, 7);
     round_capture(x + 8, y + 12, ww, hh, 18);
-    glass(x + 8, y + 12, ww, hh, 0x06182d, 94);
+    glass(x + 8, y + 12, ww, 9, 0x06182d, 94);
+    glass(x + 8, y + hh + 3, ww, 9, 0x06182d, 94);
+    glass(x + 8, y + 21, 9, hh - 18, 0x06182d, 94);
+    glass(x + ww - 1, y + 21, 9, hh - 18, 0x06182d, 94);
     round_finish(x + 8, y + 12, ww, hh, 18);
     round_capture(x + 4, y + 6, ww, hh, 18);
-    glass(x + 4, y + 6, ww, hh, 0x0b2d50, 47);
+    glass(x + 4, y + 6, ww, 8, 0x0b2d50, 47);
+    glass(x + 4, y + hh - 2, ww, 8, 0x0b2d50, 47);
+    glass(x + 4, y + 14, 8, hh - 16, 0x0b2d50, 47);
+    glass(x + ww - 4, y + 14, 8, hh - 16, 0x0b2d50, 47);
     round_finish(x + 4, y + 6, ww, hh, 18);
     round_capture(x, y, ww, hh, 16);
-    glass_frame(x, y, ww, hh, focused ? 0xb3dbf7 : 0xcbd5e1, 120 + glass_level * 25);
+    glass(x, y, ww, 35, focused ? 0xb3dbf7 : 0xcbd5e1, 120 + glass_level * 25);
+    glass(x, y + 35, 2, hh - 35, focused ? 0xb3dbf7 : 0xcbd5e1, 120 + glass_level * 25);
+    glass(x + ww - 2, y + 35, 2, hh - 35, focused ? 0xb3dbf7 : 0xcbd5e1, 120 + glass_level * 25);
+    glass(x + 2, y + hh - 2, ww - 4, 2, focused ? 0xb3dbf7 : 0xcbd5e1, 120 + glass_level * 25);
+    glass(x + 1, y + 1, ww - 2, 1, 0xffffff, 120);
+    rect(x + 1, y + hh - 2, ww - 2, 1, 0x7893ac);
+    rect(x, y + 1, 1, hh - 2, 0x527493);
+    rect(x + ww - 1, y + 1, 1, hh - 2, 0x527493);
     glass(x + 2, y + 2, ww - 4, 31, focused ? 0x2e8ac0 : 0x7794a9, focused ? 71 : 52);
     glass(x + 2, y + 2, ww - 4, 12, 0xffffff, 47);
     rect(x + 2, y + 33, ww - 4, 1, 0x6488a5);
@@ -2790,7 +2804,7 @@ static void init_mouse(void) {
     write_mouse(0xf4);
 }
 
-static int hover_delay_target(void) { return 60; }
+static int hover_delay_target(void) { return 120; }
 
 static void update_hover_timer(int pulse) {
     int active = task_hover >= 0 && !start_open && !context_open && !quick_open && !notification_open && !run_open && !tab_active;
@@ -2832,8 +2846,8 @@ static int advance_frame_counter(uint16_t sample) {
     }
     timer_unchanged = 0;
     timer_accum += elapsed;
-    if (timer_accum < 19886) return 0;
-    timer_accum %= 19886;
+    if (timer_accum < 9943) return 0;
+    timer_accum %= 9943;
     return 1;
 }
 
@@ -2865,16 +2879,18 @@ static void init_cpu(void) {
 void kmain(void) {
     sw = (int)boot_width;
     sh = (int)boot_height;
-    if (sw < 1 || sh < 1 || sw > 1280 || sh > 900) for (;;) __asm__ volatile("cli; hlt");
+    if (sw < 1 || sh < 1 || sw > 1920 || sh > 1080) for (;;) __asm__ volatile("cli; hlt");
     init_cpu();
     if (boot_bpp == 8) program_palette();
     mouse_x = sw / 2;
     mouse_y = sh / 2;
     for (int i = 0; i < APPS; i++) {
-        windows[i].x = (sw >= 1100 ? (sw - 760) / 2 : sw >= 700 ? 145 : 12) + 14 * (i % 4);
-        windows[i].y = (sh >= 700 ? 87 : sh >= 490 ? 65 : 9) + 15 * (i % 4);
-        windows[i].w = sw >= 1100 ? 760 : sw >= 700 ? 590 : sw - 25;
-        windows[i].h = sh >= 700 ? 485 : sh >= 540 ? 430 : sh - 67;
+        int base_w = sw >= 1700 ? 1050 : sw >= 1100 ? 760 : sw >= 700 ? 590 : sw - 25;
+        int base_h = sh >= 1000 ? 700 : sh >= 700 ? 485 : sh >= 540 ? 430 : sh - 67;
+        windows[i].x = (sw >= 1700 ? (sw - base_w) / 2 : sw >= 1100 ? (sw - base_w) / 2 : sw >= 700 ? 145 : 12) + 14 * (i % 4);
+        windows[i].y = (sh >= 1000 ? (sh - base_h) / 2 - 12 : sh >= 700 ? 87 : sh >= 490 ? 65 : 9) + 15 * (i % 4);
+        windows[i].w = base_w;
+        windows[i].h = base_h;
         windows[i].opened = 0;
     }
     if (sw < 500) {
@@ -2886,12 +2902,12 @@ void kmain(void) {
         }
     }
     notes_len = size(notes);
-    log_write("Cinmix kernel 0.13.3  [i386]");
+    log_write("Cinmix kernel 0.14  [i386]");
     log_write("RAM volume mounted at R:");
     init_mouse();
     init_frame_clock();
     refresh_clock();
-    notify("Cinmix 0.13.3 is ready");
+    notify("Cinmix 0.14 is ready");
     repaint();
     uint32_t cycles = 0;
     for (;;) {

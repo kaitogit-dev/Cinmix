@@ -1,59 +1,32 @@
-# Cinmix 0.13.3
+# Cinmix 0.14
 
-Cinmix is a freestanding 32-bit x86 desktop operating system designed for a legacy BIOS El Torito CD image at 1280 x 720. Its desktop combines Aero-style glass, a centered icon-only taskbar, anti-aliased edges, animated windows, and lightweight built-in apps.
+Cinmix is a freestanding 32-bit x86 desktop operating system, booted from a legacy BIOS El Torito ISO. The preferred display is now **1920 × 1080 at 32-bit color**, with a Windows 7 Aero / Windows 11-inspired interface, centered icon-only taskbar, anti-aliased controls, and animated windows.
 
-## Fixed in 0.13.3
+## New in 0.14
 
-- Restored a rounded translucent tile behind **hovered and active taskbar apps**. Inactive apps remain tile-free, and the active/running underlines are preserved. Desktop shortcuts are unchanged.
-- Opening and restoring windows now use a four-step eased transition instead of seven, beginning closer to their final position and size. Maximize and snap transitions use five steps instead of seven.
-- Kept the seven-step closing and minimizing tween for a smooth exit.
-- Added `tests/ui133.c` to verify animation duration, interpolated window geometry, opening/restoring behavior, and taskbar highlight colors.
+- Prefer **1920 × 1080 × 32** through VBE mode discovery or Bochs-compatible graphics registers. The 1080p framebuffer pitch is **7680 bytes per row**. A lower VBE resolution or VGA fallback remains available if the emulator does not support full HD; the OS does not falsely stretch lower-resolution modes.
+- Lifted the renderer's old 1280 × 900 ceiling and expanded the default app windows to 1050 × 700 at full HD. The native regression test allocates both 1920 × 1080 backbuffers and checks exact framebuffer copies, controls and partial redraws.
+- **120 Hz animation scheduler** in place of 60 Hz. Windows now open in three eased steps (about 25 ms in ideal timing), maximize/snap in four steps, and close/minimize in five steps. Panel tweens use six steps (about 50 ms). Real timing still depends on emulator rendering speed.
+- Keep the taskbar hover delay at approximately **one second** by adjusting it to 120 animation-clock pulses.
+- Window rendering now avoids large, unnecessary translucent blends behind opaque window interiors, concentrating those glass passes on edges and title bars to reduce cost at 1080p.
+- Preserved the cursor, active/hover taskbar glass highlights, minimized and closing window tweens, Alt+Tab, Quick Panel, Notification Center, desktop icons, and existing applications.
 
-## Retained from 0.13.2
+## Existing features
 
-- Reversible opening and closing tweens for Start, desktop context menu, Quick Panel, Notification Center, Run, Alt+Tab, and taskbar hover tooltips.
-- Closing a popup partway through its opening animation reverses smoothly instead of snapping away.
-- Cleanup of stale popup pixels after the last closing frame.
-- Show Desktop uses the regular minimize animation, and restoring windows animates them back.
-- These transitions use the existing 60 Hz-paced damage-region compositor rather than forcing full-screen redraws.
+Ten built-in apps, a searchable Start menu, draggable and resizable windows, minimize, close, maximize, snap, animated Show Desktop, right-click desktop context menu, reversible open/close panels, keyboard desktop focus, visual Alt+Tab, translucent themes, wallpaper and accent settings, Run dialog (`Ctrl+R`), and delayed taskbar previews.
 
-## Existing appearance refinements (0.13.1)
+## Build
 
-- Enlarged all eight desktop shortcut icons while reducing both row and column spacing.
-- Replaced the dark taskbar label popup with a compact light Aero-style tooltip anchored to its icon; running app previews have a consistent lighter header and border.
-
-## Included from 0.13
-
-- Replaced the old hardcoded cursor with a new white SVG-inspired arrow cursor, drawn with anti-aliased edges and a subtle shadow.
-- Fixed taskbar hover labels so they wait about one second before appearing, instead of showing immediately.
-- Removed generic app-open notifications, so opening Files or other apps no longer spams Notification Center.
-- Added a Run dialog. Open it with `Ctrl+R` or from Quick Panel, type commands like `files`, `notes`, `console`, `appearance`, `calendar`, `desktop`, `reboot`, or `shutdown`, then press Enter.
-- Retained clean desktop icons and tile-free inactive taskbar icons, active app underlines, Alt+Tab visual switching, keyboard desktop navigation, resize and snap behavior, Notification Center, Quick Panel, and all ten apps.
-
-## Keyboard shortcuts
-
-| Keys | Action |
-|---|---|
-| Alt+Tab | Preview and switch open windows; release Alt to commit |
-| Shift+Alt+Tab | Cycle backwards through open windows |
-| Escape | Cancel switcher, desktop selection, Run dialog, or panels |
-| Ctrl+Alt+D | Toggle desktop shortcut keyboard focus |
-| Arrows, Enter | Select and open a focused desktop shortcut |
-| Ctrl+R | Open or close the Run dialog |
-| Ctrl+1 through Ctrl+7 | Launch pinned apps |
-| Alt+F4 | Close active app |
-| Alt+D | Show or restore desktop |
-| Ctrl+Alt+N | Toggle Notification Center |
-| Ctrl+Alt+Left / Right | Snap active window |
-
-## Build and verification
-
-Use Linux with GCC, GNU binutils, Python 3 and 32-bit compilation support.
+Requires GCC, GNU binutils and Python 3 on Linux, including `-m32` compilation support.
 
 ```sh
 make verify
 ```
 
-The build produces `Cinmix-0.13.3.iso`. Tests validate ISO and boot structures, window controls through simulated PS/2 mouse packets, compositor updates, icon and keyboard behavior from 0.12, and the new 0.13.3 highlighted taskbar and shortened opening animations. Native tests and static ISO checks are **not** a substitute for full BIOS emulator testing. Visual smoothness and runtime performance must be verified in your emulator.
+The resulting image is `Cinmix-0.14.iso`. `make verify` checks the El Torito image and bootloader, validates the 1920 × 1080 mode-selection instructions, and runs native regression suites at 720p as well as a real 1080p framebuffer test.
 
-Software volume controls do not yet output audio through a hardware driver. Font licensing is in `FONT-LICENSE.txt`.
+### Testing limitation
+
+The full-resolution compositor, event handling, and ISO structure have been tested natively. **An actual BIOS emulator boot has not been tested in this environment.** The emulator must support a 1920 × 1080 × 32 graphics mode and enough video memory (roughly 8 MiB for one framebuffer), or the firmware will select a supported fallback. The emulator also needs sufficient system RAM for two 1080p software buffers and the OS.
+
+The software volume interface does not yet output to an audio device driver. Font licensing is in `FONT-LICENSE.txt`.

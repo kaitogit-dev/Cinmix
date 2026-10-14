@@ -37,7 +37,7 @@ int main(void) {
     int notes_x = bar + taskbar_step() + 5;
     uint32_t files_plain = color_at(files_x, y);
     uint32_t notes_plain = color_at(notes_x, y);
-    check(WINDOW_OPEN_STEPS == 4 && WINDOW_RESIZE_STEPS == 5);
+    check(WINDOW_OPEN_STEPS == 3 && WINDOW_RESIZE_STEPS == 4);
     check(WINDOW_OPEN_STEPS < WINDOW_CLOSE_STEPS);
     open_window(FILES);
     check(anim_ticks[FILES] == WINDOW_OPEN_STEPS);
@@ -80,6 +80,6 @@ int main(void) {
     check(windows[NOTES].minimized && !anim_visible[NOTES]);
     open_window(NOTES);
     check(anim_ticks[NOTES] == WINDOW_OPEN_STEPS && !windows[NOTES].minimized);
-    printf("PASS: four-step eased window opening, intact seven-step closing and minimize, tinted active and hover taskbar tiles, plain inactive icons\n");
+    printf("PASS: three-step eased window opening, intact five-step closing and minimize, tinted active and hover taskbar tiles, plain inactive icons\n");
     return 0;
 }

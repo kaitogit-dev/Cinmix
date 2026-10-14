@@ -1,5 +1,3 @@
-Cinmix 0.13.3 | BIOS i386 | 1280x720
+Cinmix 0.14 | BIOS i386 | Full HD 1920x1080 preferred
 
-New in 0.13.3: responsive four-frame eased window opening/restore, five-frame maximize/snap transitions, and restored rounded translucent highlights for active/hovered taskbar apps. Window closing/minimizing tweens remain seven frames.
-
-Retains reversible animations for Start, context menu, Quick Panel, Notification Center, Run, Alt+Tab and tooltips; animated Show Desktop; enlarged desktop icons; clean inactive taskbar items; anti-aliased SVG cursor; one-second hover delay; silent app launching; native desktop applications.
+Cinmix now targets 1920x1080x32 through Bochs/VBE modes with a fallback where the hardware does not support it. Full HD software framebuffers use 7680 bytes per row. Transitions use a 120Hz animation clock with shorter eased window and panel tweens. Unnecessary full-window glass work behind opaque content was reduced to help responsiveness at 1080p. Taskbar hover delay remains approximately one second. Existing apps, icons, cursor, windows, panel animations and taskbar highlights remain.

@@ -37,7 +37,7 @@ static void open_and_close(int *state, int panel, const char *preview) {
     *state = 1;
     dirty = 1;
     frames(4);
-    check(panel_step[panel] == 4 && panel_goal[panel] == 8);
+    check(panel_step[panel] == 4 && panel_goal[panel] == PANEL_STEPS);
     if (preview) snap(preview);
     *state = 0;
     dirty = 1;
@@ -46,9 +46,9 @@ static void open_and_close(int *state, int panel, const char *preview) {
     *state = 1;
     dirty = 1;
     frame();
-    check(panel_step[panel] == 4 && panel_goal[panel] == 8);
-    frames(4);
-    check(panel_step[panel] == 8);
+    check(panel_step[panel] == 4 && panel_goal[panel] == PANEL_STEPS);
+    frames(PANEL_STEPS - 4);
+    check(panel_step[panel] == PANEL_STEPS);
     *state = 0;
     dirty = 1;
     frames(9);
