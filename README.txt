@@ -1,6 +1,3 @@
-Cinmix 0.18 | BIOS i386 | 1920x1080 preferred
-Persistent disk support: ATA PIO primary IDE master + signed 16MiB CinmixFS disk.
-Boot the CD ISO and attach Cinmix-0.18-disk.img as the primary IDE hard drive.
-Notes: Ctrl+S to save; saved on close. Explorer: New creates saved documents.
-Do not attach an existing real disk; Cinmix writes only to its own signed volume.
-RAM-only fallback when no valid disk is attached.
+Cinmix 0.19 | BIOS i386 | 1920x1080 preferred
+Windows-inspired internals: app task IDs, generation-checked window and file handles, queued window messages with bounded dispatch, and a stream-oriented D: file API backed by persistent CinmixFS. Existing programs and the 0.18 disk format remain compatible.
+Attach Cinmix-0.19-disk.img as primary IDE master and keep the same image between boots. Use Console tasklist and handles commands to inspect OS objects.

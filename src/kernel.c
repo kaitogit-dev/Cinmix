@@ -260,6 +260,7 @@ static inline void out8(uint16_t port, uint8_t value) {
 }
 
 #include "storage.c"
+#include "objects.c"
 
 static int same(const char *a, const char *b) {
     while (*a && *b && *a == *b) { a++; b++; }
@@ -369,6 +370,7 @@ static void notify(const char *message) {
 
 static void toggle_desktop(void);
 static void open_window(int app);
+static void cm_ui_dispatch(int app, const struct CmMessage *event);
 
 static void select_theme(int selected) {
     if (selected < 0 || selected > 3) return;
@@ -529,10 +531,13 @@ static void animated_window_rect(int app, int *x, int *y, int *w, int *h);
 
 static void notes_commit(void) {
     if (!notes_dirty) return;
-    if (storage_ready && storage_save(notes_filename, notes, (uint32_t)notes_len)) {
-        notes_dirty = 0;
-        notes_save_failed = 0;
-    } else if (storage_ready) notes_save_failed = 1;
+    if (storage_ready) {
+        uint32_t handle = cm_file_open(NOTES, notes_filename, CM_OPEN_WRITE | CM_OPEN_CREATE | CM_OPEN_TRUNCATE);
+        int saved = handle && cm_file_seek(handle, 0) && cm_file_write(handle, notes, notes_len) == notes_len && cm_file_close(handle);
+        if (handle && !saved) cm_file_abort(handle);
+        if (saved) { notes_dirty = 0; notes_save_failed = 0; }
+        else notes_save_failed = 1;
+    }
     dirty = 1;
 }
 
@@ -545,8 +550,12 @@ static int notes_select(const char *name) {
     notes_len = 0;
     notes[0] = 0;
     if (storage_ready) {
-        int loaded = storage_load(notes_filename, notes, sizeof(notes));
-        if (loaded >= 0) notes_len = loaded;
+        uint32_t handle = cm_file_open(NOTES, notes_filename, CM_OPEN_READ);
+        if (handle) {
+            int loaded = cm_file_read(handle, notes, sizeof(notes) - 1);
+            if (loaded >= 0) { notes_len = loaded; notes[notes_len] = 0; }
+            cm_file_close(handle);
+        }
     }
     notes_dirty = 0;
     notes_save_failed = 0;
@@ -556,6 +565,12 @@ static int notes_select(const char *name) {
 static void close_window(int app, int minimizing) {
     if (!windows[app].opened || windows[app].minimized) return;
     if (app == NOTES) notes_commit();
+    uint32_t handle = cm_window_handle(app);
+    if (handle) {
+        cm_post(handle, minimizing ? CM_MSG_MINIMIZE : CM_MSG_CLOSE, 0, 0);
+        cm_pump(CM_QUEUE_LIMIT, cm_ui_dispatch);
+        cm_window_close(app, minimizing);
+    }
     Window *w = &windows[app];
     int x, y, width, height;
     animated_window_rect(app, &x, &y, &width, &height);
@@ -1158,6 +1173,7 @@ static void print_info(void) {
     log_write("help ver ls cat clear mem cpu date");
     log_write("notes files clock calc sketch theme");
     log_write("calendar windows echo reboot halt");
+    log_write("tasklist handles disk save");
     log_write("screen snapleft snapright");
     log_write("context resize");
 }
@@ -1187,7 +1203,7 @@ static void execute_command(void) {
     log_write(linebuf);
     if (!console_len) return;
     if (same(console_input, "help")) print_info();
-    else if (same(console_input, "ver")) log_write("Cinmix 0.18  |  kernel 0.18  |  i386");
+    else if (same(console_input, "ver")) log_write("Cinmix 0.19  |  kernel 0.19  |  i386");
     else if (same(console_input, "clear")) log_count = 0;
     else if (same(console_input, "context")) log_write("Right click on desktop");
     else if (same(console_input, "dark")) { select_theme(3); log_write("Dark Aero enabled"); }
@@ -1200,7 +1216,7 @@ static void execute_command(void) {
         log_write("/ram/readme.txt");
         log_write("/ram/boot.log");
         log_write("/ram/notes.txt");
-    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix 0.18; persistent D: requires CinmixFS disk");
+    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix 0.19; persistent D: requires CinmixFS disk");
     else if (same(console_input, "cat boot.log")) log_write("El Torito -> kernel -> protected mode -> UI");
     else if (same(console_input, "cat notes.txt")) {
         char one[72] = "";
@@ -1211,6 +1227,20 @@ static void execute_command(void) {
     } else if (same(console_input, "disk")) log_write(storage_ready ? "D: CinmixFS on ATA primary master" : "No formatted writable disk detected");
     else if (same(console_input, "save")) { notes_commit(); log_write(storage_ready && !notes_dirty ? "Notes saved on D:" : "No writable storage"); }
     else if (same(console_input, "mem")) log_write("Physical canvas: 0x00400000");
+    else if (same(console_input, "handles")) {
+        char line[72] = "Kernel handles in use: ", n[12];
+        number(n, (uint32_t)cm_handle_count()); append(line, n, 72);
+        log_write(line);
+    }
+    else if (same(console_input, "tasklist")) {
+        for (int i = 0; i < APPS; i++) if (cm_tasks[i].pid) {
+            char line[72] = "PID ", n[12];
+            number(n, cm_tasks[i].pid); append(line, n, 72);
+            append(line, "  ", 72); append(line, app_name[i], 72);
+            append(line, cm_tasks[i].state == CM_TASK_RUNNING ? "  Running" : cm_tasks[i].state == CM_TASK_MINIMIZED ? "  Minimized" : "  Stopped", 72);
+            log_write(line);
+        }
+    }
     else if (same(console_input, "cpu")) log_write(cpu_vendor);
     else if (same(console_input, "date")) { log_write(clock_date); log_write(clock_time); }
     else if (same(console_input, "screen")) {
@@ -1234,14 +1264,14 @@ static void execute_command(void) {
         if (a >= 0) snap_window(a, same(console_input, "snapleft") ? -1 : 1);
         else log_write("No window to snap");
     }
-    else if (same(console_input, "clock")) { windows[CLOCK].opened = 1; windows[CLOCK].minimized = 0; windows[CLOCK].order = ++next_order; }
-    else if (same(console_input, "calc")) { windows[CALC].opened = 1; windows[CALC].minimized = 0; windows[CALC].order = ++next_order; }
-    else if (same(console_input, "sketch")) { windows[SKETCH].opened = 1; windows[SKETCH].minimized = 0; windows[SKETCH].order = ++next_order; }
-    else if (same(console_input, "theme")) { windows[APPEAR].opened = 1; windows[APPEAR].minimized = 0; windows[APPEAR].order = ++next_order; }
-    else if (same(console_input, "calendar")) { windows[CALENDAR].opened = 1; windows[CALENDAR].minimized = 0; windows[CALENDAR].order = ++next_order; }
-    else if (same(console_input, "windows")) { windows[WINDOWS_APP].opened = 1; windows[WINDOWS_APP].minimized = 0; windows[WINDOWS_APP].order = ++next_order; }
-    else if (same(console_input, "notes")) { windows[NOTES].opened = 1; windows[NOTES].minimized = 0; windows[NOTES].order = ++next_order; }
-    else if (same(console_input, "files")) { windows[FILES].opened = 1; windows[FILES].minimized = 0; windows[FILES].order = ++next_order; }
+    else if (same(console_input, "clock")) open_window(CLOCK);
+    else if (same(console_input, "calc")) open_window(CALC);
+    else if (same(console_input, "sketch")) open_window(SKETCH);
+    else if (same(console_input, "theme")) open_window(APPEAR);
+    else if (same(console_input, "calendar")) open_window(CALENDAR);
+    else if (same(console_input, "windows")) open_window(WINDOWS_APP);
+    else if (same(console_input, "notes")) open_window(NOTES);
+    else if (same(console_input, "files")) open_window(FILES);
     else if (same(console_input, "reboot")) reboot_machine();
     else if (same(console_input, "halt")) halt_machine();
     else if (begins(console_input, "echo ")) log_write(console_input + 5);
@@ -1368,6 +1398,10 @@ static void open_window(int app) {
     desktop_hidden = 0;
     run_open = 0;
     int first = !windows[app].opened || windows[app].minimized;
+    int new_object = !cm_window_handle(app);
+    uint32_t handle = cm_window_open(app);
+    if (handle && new_object) cm_post(handle, CM_MSG_CREATE, app, 0);
+    if (handle) cm_post(handle, CM_MSG_ACTIVATE, app, 0);
     int reversing = first && anim_ticks[app] > 0 && anim_exit[app] && anim_visible[app];
     int reverse_x = 0, reverse_y = 0, reverse_w = 0, reverse_h = 0;
     if (reversing) animated_window_rect(app, &reverse_x, &reverse_y, &reverse_w, &reverse_h);
@@ -1434,7 +1468,7 @@ static void files_restore(void) {
     if (!storage_ready) return;
     char name[24];
     for (int k = 0; k < STORAGE_SLOTS && file_created < 3; k++) {
-        if (!storage_list(k, name)) break;
+        if (!cm_file_list(k, name)) break;
         if (same(name, "notes.txt")) continue;
         copy(file_extra_names[file_created++], name, 24);
     }
@@ -1505,10 +1539,11 @@ static int files_action(const Window *w, int px, int py) {
     if (inside(px, py, x + 24, y + 15, 60, 24)) {
         if (file_created < 3) {
             const char *name = file_extra_names[file_created];
-            if (!storage_ready || storage_save(name, "", 0)) {
+            uint32_t handle = storage_ready ? cm_file_open(FILES, name, CM_OPEN_WRITE | CM_OPEN_CREATE | CM_OPEN_TRUNCATE) : 0;
+            if (!storage_ready || (handle && cm_file_close(handle))) {
                 selected_file = FILE_COUNT + file_created++;
                 file_location = 6; file_search_len = 0; file_search[0] = 0;
-            } else notify("Disk write failed");
+            } else { if (handle) cm_file_abort(handle); notify("Disk write failed"); }
         }
         file_search_focus = 0; return 1;
     }
@@ -1747,10 +1782,10 @@ static void window_content(int app, const Window *w) {
     } else if (app == SYSTEM) {
         rect(x, y, cw, 4, BLUE);
         big_text(x + 21, y + 22, "CINMIX", INK);
-        text(x + 24, y + 62, "RELEASE 0.18", STEEL);
+        text(x + 24, y + 62, "RELEASE 0.19", STEEL);
         rect(x + 21, y + 91, cw - 42, 1, HAIR);
         text(x + 24, y + 106, "Kernel", STEEL);
-        text(x + 166, y + 106, "Cinmix 0.18", INK);
+        text(x + 166, y + 106, "Cinmix 0.19", INK);
         text(x + 24, y + 134, "Target", STEEL);
         text(x + 166, y + 134, "i386 protected", INK);
         text(x + 24, y + 162, "Firmware", STEEL);
@@ -1765,8 +1800,17 @@ static void window_content(int app, const Window *w) {
         number(tmp, (uint32_t)sh); append(display, tmp, 48);
         append(display, boot_bpp == 32 ? " / VBE" : " / VGA", 48);
         text(x + 166, y + 218, display, INK);
-        text(x + 24, y + 246, "Volume", STEEL);
-        text(x + 166, y + 246, "RAM, volatile", INK);
+        text(x + 24, y + 246, "Storage", STEEL);
+        text(x + 166, y + 246, storage_ready ? "Disk D: / CinmixFS" : "RAM-only session", INK);
+        text(x + 24, y + 274, "Window manager", STEEL);
+        text(x + 166, y + 274, "Message-based dispatch", INK);
+        text(x + 24, y + 302, "Kernel objects", STEEL);
+        char objects[12]; number(objects, (uint32_t)cm_handle_count());
+        text(x + 166, y + 302, objects, INK);
+        text(x + 24, y + 330, "App tasks", STEEL);
+        int tasks = 0; for (int i = 0; i < APPS; i++) if (cm_tasks[i].state) tasks++;
+        number(objects, (uint32_t)tasks);
+        text(x + 166, y + 330, objects, INK);
     } else if (app == CLOCK) {
         rect(x, y, cw, 4, BLUE);
         text(x + 22, y + 30, "SYSTEM RTC", STEEL);
@@ -1790,7 +1834,7 @@ static void window_content(int app, const Window *w) {
             text(x + 55, yy + 9, pages[k], settings_page == k ? INK : INK2);
         }
         rect(x + 22, y + ch - 75, nw - 20, 1, HAIR);
-        text(x + 27, y + ch - 57, "Cinmix 0.18", STEEL);
+        text(x + 27, y + ch - 57, "Cinmix 0.19", STEEL);
         text(x + 27, y + ch - 37, "1920 x 1080", STEEL);
         big_text(mx, y + 18, pages[settings_page], INK);
         if (settings_page == 1) {
@@ -1884,7 +1928,7 @@ static void window_content(int app, const Window *w) {
         } else {
             text(mx + 2, y + 61, "About Cinmix", STEEL);
             rounded(mx, y + 93, mw, 222, 12, UI_CARD);
-            big_text(mx + 20, y + 116, "Cinmix 0.18", INK);
+            big_text(mx + 20, y + 116, "Cinmix 0.19", INK);
             text(mx + 23, y + 162, "32-bit i386 operating system", STEEL);
             text(mx + 23, y + 193, "Legacy BIOS / El Torito boot", STEEL);
             text(mx + 23, y + 224, "Aero desktop with Dark Aero", STEEL);
@@ -1953,7 +1997,10 @@ static void window_content(int app, const Window *w) {
             if (cy + 33 > y + ch) break;
             rounded(x + 20, cy, cw - 40, 32, 5, LIGHT);
             text(x + 32, cy + 8, app_name[i], INK);
-            text(x + 205, cy + 8, windows[i].minimized ? "Minimized" : "Open", STEEL);
+            char pid[32] = "PID ", number_text[12];
+            number(number_text, cm_tasks[i].pid); append(pid, number_text, 32);
+            text(x + 170, cy + 8, pid, STEEL);
+            text(x + 280, cy + 8, windows[i].minimized ? "Minimized" : "Running", STEEL);
             rounded(x + cw - 163, cy + 3, 78, 26, 4, 0xd6e8f7);
             rounded(x + cw - 80, cy + 3, 61, 26, 4, 0xe7e9f0);
             text(x + cw - 154, cy + 7, "Switch", BLUE);
@@ -2656,6 +2703,8 @@ static void repaint(void) {
         damage_frames++;
     }
     for (int i = 0; i < APPS; i++) {
+        if (visible[i] && cm_window_handle(i) && (entire || changed_window || dirty))
+            cm_post(cm_window_handle(i), CM_MSG_PAINT, current[i].w, current[i].h);
         last_window_rect[i] = current[i];
         last_window_visible[i] = (uint8_t)visible[i];
         last_window_order[i] = windows[i].order;
@@ -2869,6 +2918,7 @@ static void handle_click(void) {
             animated_window_rect(i, &hit_x, &hit_y, &hit_w, &hit_h);
             if (!inside(mouse_x, mouse_y, hit_x, hit_y, hit_w, hit_h) && !inside(mouse_x, mouse_y, w->x, w->y, w->w, w->h)) continue;
             w->order = ++next_order;
+            if (cm_window_handle(i)) cm_post(cm_window_handle(i), CM_MSG_MOUSE, mouse_x - hit_x, mouse_y - hit_y);
             if (inside(mouse_x, mouse_y, hit_x + hit_w - 31, hit_y + 4, 27, 25) || inside(mouse_x, mouse_y, w->x + w->w - 31, w->y + 4, 27, 25)) close_window(i, 0);
             else if (inside(mouse_x, mouse_y, hit_x + hit_w - 61, hit_y + 4, 27, 25) || inside(mouse_x, mouse_y, w->x + w->w - 61, w->y + 4, 27, 25)) toggle_maximize(i);
             else if (inside(mouse_x, mouse_y, hit_x + hit_w - 91, hit_y + 4, 27, 25) || inside(mouse_x, mouse_y, w->x + w->w - 91, w->y + 4, 27, 25)) close_window(i, 1);
@@ -3050,6 +3100,24 @@ static const char shift_keys[128] = {
     [0x33]='<',[0x34]='>',[0x35]='?'
 };
 
+static void cm_ui_dispatch(int app, const struct CmMessage *event) {
+    if (event->message != CM_MSG_KEY && event->message != CM_MSG_CHAR) return;
+    if (app != NOTES && app != CONSOLE) return;
+    int key = event->wparam;
+    int ch = event->lparam;
+    if (key == 0x0e) {
+        if (app == NOTES && notes_len > 0) { notes[--notes_len] = 0; notes_dirty = 1; }
+        if (app == CONSOLE && console_len > 0) console_input[--console_len] = 0;
+    } else if (key == 0x1c) {
+        if (app == NOTES && notes_len < 2046) { notes[notes_len++] = '\n'; notes[notes_len] = 0; notes_dirty = 1; }
+        else if (app == CONSOLE) execute_command();
+    } else if (ch) {
+        if (app == NOTES && notes_len < 2046) { notes[notes_len++] = (char)ch; notes[notes_len] = 0; notes_dirty = 1; }
+        if (app == CONSOLE && console_len < 78) { console_input[console_len++] = (char)ch; console_input[console_len] = 0; }
+    }
+    dirty = 1;
+}
+
 static void handle_key(uint8_t code) {
     int released = (code & 0x80) != 0;
     uint8_t key = code & 0x7f;
@@ -3212,15 +3280,10 @@ static void handle_key(uint8_t code) {
         else if ((ch >= '0' && ch <= '9') || ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '=') calc_press(ch);
         return;
     }
-    if (key == 0x0e) {
-        if (app == NOTES && notes_len > 0) { notes[--notes_len] = 0; notes_dirty = 1; }
-        if (app == CONSOLE && console_len > 0) console_input[--console_len] = 0;
-    } else if (key == 0x1c) {
-        if (app == NOTES && notes_len < 2046) { notes[notes_len++] = '\n'; notes[notes_len] = 0; notes_dirty = 1; }
-        else if (app == CONSOLE) execute_command();
-    } else if (ch && !control_down) {
-        if (app == NOTES && notes_len < 2046) { notes[notes_len++] = ch; notes[notes_len] = 0; notes_dirty = 1; }
-        if (app == CONSOLE && console_len < 78) { console_input[console_len++] = ch; console_input[console_len] = 0; }
+    uint32_t handle = cm_window_handle(app);
+    if (handle && (key == 0x0e || key == 0x1c || (ch && !control_down))) {
+        cm_post(handle, key == 0x0e || key == 0x1c ? CM_MSG_KEY : CM_MSG_CHAR, key, ch && !control_down ? ch : 0);
+        cm_pump(16, cm_ui_dispatch);
     }
     dirty = 1;
 }
@@ -3366,11 +3429,11 @@ void kmain(void) {
         files_restore();
         log_write("CinmixFS disk mounted at D: (ATA IDE)");
     } else log_write("RAM only: attach Cinmix disk to enable persistence");
-    log_write("Cinmix kernel 0.18  [i386]");
+    log_write("Cinmix kernel 0.19  [i386]");
     init_mouse();
     init_frame_clock();
     refresh_clock();
-    notify("Cinmix 0.18 is ready");
+    notify("Cinmix 0.19 is ready");
     repaint();
     uint32_t cycles = 0;
     for (;;) {
@@ -3382,6 +3445,7 @@ void kmain(void) {
             if (status & 0x20) handle_mouse_byte(byte);
             else handle_key(byte);
         }
+        cm_pump(16, cm_ui_dispatch);
         int need_pulse = animations_pending() || task_hover >= 0 || hover_visible || run_open;
         int animation_pulse = need_pulse ? frame_clock_tick() : 0;
         if (animation_pulse) update_hover_timer(1);

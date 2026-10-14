@@ -1,39 +1,39 @@
-# Cinmix 0.18 — Persistent storage
+# Cinmix 0.19 — Windows-inspired kernel internals
 
-Cinmix is a freestanding 32-bit x86 operating system with a Windows-inspired Aero desktop at 1920×1080. **Version 0.18 adds persistent storage**, while preserving the Windows-style Settings, File Explorer, Dark Aero, window animations and all existing applications.
+Cinmix is a freestanding 32-bit i386 desktop operating system with Aero and Dark Aero themes, a 1920×1080 preferred display and BIOS El Torito CD boot support. Version 0.19 preserves all 0.18 desktop features and adds **Windows-inspired infrastructure underneath the interface**.
 
-## What works
+## What's new inside the OS
 
-- **ATA PIO** 28-bit LBA sector I/O on the **primary IDE master** using ports `0x1F0–0x1F7` and `0x3F6`, with hardware identification and bounded status waits.
-- **CinmixFS**: a compact filesystem with a signed superblock, CRC32 checksums, alternating directory copies and copy-on-write data banks. A write that fails before committing directory metadata does not replace the previously saved version.
-- **Notes:** `Ctrl+S` saves the current document to the attached disk; closing or minimizing Notes also saves it. Opening a saved document in Explorer loads its contents from the disk. The default `notes.txt` persists too.
-- **File Explorer:** New Document creates a real entry on the disk; saved documents appear again when the same disk image is attached at the next boot. The app keeps existing navigation, sorting, searching and details controls.
-- **Settings > System > Storage** shows whether the writable disk is detected. The Console `disk` command also reports it.
-- **Safety:** Cinmix will not format any disk automatically. It enables writing only if the expected CinmixFS signature, version, geometry and directory checksums are valid. Without a valid disk it stays in temporary RAM-only mode.
+- **Task registry:** each of the ten built-in applications gets a stable session-local task ID (PID) and Running, Minimized, or Stopped state. A task is an application identity within the existing single-threaded kernel, **not a hardware-protected process**.
+- **Typed kernel handles:** windows and open files use generation-checked opaque 32-bit handles. A handle that is closed and whose slot has been reused is rejected rather than accidentally addressing the new object. The object table supports up to 32 live objects.
+- **Window message queue:** create, activate, close, minimize, paint, mouse, key and character messages are posted to a bounded queue with validated destination window handles. Duplicate paint messages are coalesced, and messages for destroyed windows are discarded. The main event loop pumps the queue with a fixed per-iteration budget. Notes and Console editing use the message dispatcher.
+- **File-handle API:** open, read, write, seek, flush and close operations on the `D:` drive sit between applications and the CinmixFS storage driver. Notes and Explorer create and save documents through these APIs rather than calling raw filesystem operations. Buffered writes commit through CinmixFS's existing copy-on-write directory and data-bank scheme.
+- **Diagnostics:** use `tasklist` in Console to see app PIDs and states, and `handles` to see allocated objects. The System app displays task and handle counts and whether a persistent disk is mounted; Windows shows a PID next to each running window.
 
-## Running Cinmix with a writable disk
+This is **inspired by Windows architecture**, but it is **not Windows NT or a Win32 implementation**. It cannot run Windows executables. The kernel, apps and drivers still share a single address space and run cooperatively without per-process memory protection, preemptive scheduling, DLL loading, a registry, virtual memory or Windows drivers. Those would require much larger architectural changes.
 
-Use **two files together**: the bootable `Cinmix-0.18.iso` and the separate `Cinmix-0.18-disk.img` (16 MiB). Use the **same disk image for subsequent boots** to preserve data; **do not download a fresh empty disk image over your saved one**. Back up your image regularly.
+## Disk compatibility
 
-For example, in QEMU:
+**Keep your existing Cinmix 0.18 disk image** if it has saved data. Cinmix 0.19 uses the **same unmodified CinmixFS on-disk format**, including its signed superblock, fixed 16 file slots, 4 KiB per-file limit, and dual directory copies. The optional new `Cinmix-0.19-disk.img` is a blank 16 MiB image; do not overwrite your existing disk with it. Files created through the new handle API are persisted through the same ATA PIO driver.
 
-```sh
-qemu-system-i386 -m 256 -vga std -cdrom Cinmix-0.18.iso -boot d -drive file=Cinmix-0.18-disk.img,format=raw,if=ide,index=0
+Use both boot media and one persistent IDE disk image:
+
+```bash
+qemu-system-i386 -m 256 -vga std -cdrom Cinmix-0.19.iso -boot d \
+  -drive file=Cinmix-0.19-disk.img,format=raw,if=ide,index=0
 ```
 
-The CD image boots the OS; the disk image is a writable **primary IDE master hard disk**. The loader does not boot from the disk. To create a new blank CinmixFS image yourself, run `python3 tools/disk.py new-disk.img`. The command refuses to overwrite an existing file. Using the ISO alone still works, but new documents and notes are temporary.
+The ISO alone still boots with a temporary RAM-only session. Cinmix never automatically formats an unknown attached drive. Make backups of writable disk images before testing an experimental OS.
 
-### Filesystem limitations
+## Build and verification
 
-CinmixFS is **not FAT/NTFS/ext** and cannot be mounted directly by the host operating system. Version 0.18 supports 16 fixed document slots, up to 4096 bytes per file (Notes edits up to 2047 characters). Explorer exposes its three user-created document slots plus built-in demonstration entries; disk storage is not yet a general-purpose filesystem with folders, deletion, and file extension associations. Running programs and the framebuffer still require RAM; the disk removes the loss of saved documents between boots, not the use of RAM itself. The implementation does not handle real hardware DMA, SATA/AHCI or USB storage.
+On Linux with GCC including `-m32`, GNU binutils and Python 3:
 
-## Build and tests
-
-On Linux with GCC, GNU binutils, Python 3 and `-m32` compilation support:
-
-```sh
+```bash
 make verify
 make all
 ```
 
-`make verify` runs ISO9660 and El Torito structure checks, native UI regressions, persistence tests that save and reopen the disk **across separate native processes**, a simulated failed metadata commit, and end-to-end Explorer/Notes save and remount interactions. `make all` creates both ISO and disk image. The disk image is not regenerated if it already exists. **A full BIOS-emulator boot has not been tested in this environment**; native mocked sector I/O validates the filesystem logic but cannot prove ATA hardware compatibility in every emulator. Never use an existing personal disk with experimental OS software.
+Tests include the existing 720p and 1080p UI regressions, ISO boot-structure checks, disk persistence across separate native processes, and new tests of message ordering, paint coalescing, stale window/file handles, file seek/read/write/close, failed metadata commits, and Notes/Explorer saves through the file API. The clean-source rebuild should reproduce the ISO byte-for-byte.
+
+**A full BIOS-emulator boot and real IDE hardware interaction have not been verified in this environment.** Native mocks exercise the code and on-disk format, not QEMU/v86 real execution. The current file system has no directories or FAT/NTFS support, and the volume controls still need an audio driver.
