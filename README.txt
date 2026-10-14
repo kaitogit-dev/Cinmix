@@ -1,4 +1,5 @@
-Cinmix 0.13.1 | BIOS i386 | 1280x720
-A new SVG-inspired white cursor replaces the old bitmap pointer. Taskbar labels now wait about a second before appearing, matching Windows more closely. App launches no longer spam notifications. New in 0.13.1: a Run dialog opened with Ctrl+R or from Quick Panel, plus the earlier clean icon-only desktop, visual Alt+Tab switcher, keyboard desktop focus, glass panels and native apps.
+Cinmix 0.13.2 | BIOS i386 | 1280x720
 
-0.13.1: Larger and more closely spaced desktop icons; light, compact, icon-anchored taskbar hover tooltip and refined active-app previews.
+New in 0.13.2: reversible open/close animations for Start, context menu, Quick Panel, Notification Center, Run, Alt+Tab and taskbar tooltips; animated Show Desktop minimize and restore; final-frame damage cleanup.
+
+Includes the 0.13.1 enlarged desktop icons, refined hover labels, 0.13 SVG-based cursor, one-second tooltip delay, silent app launching, Run dialog, icon-only taskbar, notifications and existing applications.
