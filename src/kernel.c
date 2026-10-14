@@ -71,7 +71,10 @@ static uint32_t *const desktop_cache = (uint32_t *)0xD00000;
 static int cached_wallpaper = -1;
 static int pointer_only;
 static int taskbar_dirty = 1;
-static uint8_t timer_level;
+static uint16_t timer_counter;
+static uint32_t timer_accum;
+static uint32_t timer_poll;
+static uint32_t timer_unchanged;
 static int animation_step_allowed = 1;
 static int pointer_old_x;
 static int pointer_old_y;
@@ -363,10 +366,14 @@ static void begin_window_animation(int app, int from_x, int from_y, int from_w, 
     dirty = 1;
 }
 
+static void animated_window_rect(int app, int *x, int *y, int *w, int *h);
+
 static void close_window(int app, int minimizing) {
     if (!windows[app].opened || windows[app].minimized) return;
     Window *w = &windows[app];
-    begin_window_animation(app, w->x, w->y, w->w, w->h, 7, 1);
+    int x, y, width, height;
+    animated_window_rect(app, &x, &y, &width, &height);
+    begin_window_animation(app, x, y, width, height, 7, 1);
     anim_exit[app] = 1;
     if (minimizing) w->minimized = 1;
     else w->opened = 0;
@@ -1103,6 +1110,9 @@ static void toggle_desktop(void) {
 static void open_window(int app) {
     desktop_hidden = 0;
     int first = !windows[app].opened || windows[app].minimized;
+    int reversing = first && anim_ticks[app] > 0 && anim_exit[app] && anim_visible[app];
+    int reverse_x = 0, reverse_y = 0, reverse_w = 0, reverse_h = 0;
+    if (reversing) animated_window_rect(app, &reverse_x, &reverse_y, &reverse_w, &reverse_h);
     windows[app].opened = 1;
     windows[app].minimized = 0;
     windows[app].order = ++next_order;
@@ -1111,7 +1121,8 @@ static void open_window(int app) {
     quick_open = 0;
     notification_open = 0;
     if (first) {
-        begin_window_animation(app, windows[app].x + windows[app].w / 12, windows[app].y + 24, windows[app].w * 5 / 6, windows[app].h * 5 / 6, 7, 0);
+        if (reversing) begin_window_animation(app, reverse_x, reverse_y, reverse_w, reverse_h, 7, 0);
+        else begin_window_animation(app, windows[app].x + windows[app].w / 12, windows[app].y + 24, windows[app].w * 5 / 6, windows[app].h * 5 / 6, 7, 0);
         notify_app(app);
     }
     dirty = 1;
@@ -1854,7 +1865,7 @@ static void draw_scene(void) {
 
 static void repaint(void) {
     int entire = !frame_valid || frame_theme != theme || frame_wallpaper != wallpaper ||
-        frame_glass != glass_level || frame_accent != accent_index || !dirty;
+        frame_glass != glass_level || frame_accent != accent_index;
     DamageRect current[APPS];
     int visible[APPS];
     clip_full();
@@ -1902,7 +1913,7 @@ static void repaint(void) {
                 if (last_window_visible[i]) add_window_damage(last_window_rect[i]);
             }
         }
-        if (!changed_window && !order_changed && !start_open && !context_open && !quick_open && !notification_open &&
+        if (dirty && !changed_window && !order_changed && !start_open && !context_open && !quick_open && !notification_open &&
             !last_start && !last_context && !last_quick && !last_notification && last_hover == task_hover && !taskbar_dirty) {
             int focus = active_window();
             if (focus >= 0 && visible[focus]) add_window_damage(current[focus]);
@@ -2125,11 +2136,13 @@ static void handle_click(void) {
         for (int i = 0; i < APPS; i++) {
             Window *w = &windows[i];
             if (!w->opened || w->minimized || w->order != z) continue;
-            if (!inside(mouse_x, mouse_y, w->x, w->y, w->w, w->h)) continue;
+            int hit_x, hit_y, hit_w, hit_h;
+            animated_window_rect(i, &hit_x, &hit_y, &hit_w, &hit_h);
+            if (!inside(mouse_x, mouse_y, hit_x, hit_y, hit_w, hit_h) && !inside(mouse_x, mouse_y, w->x, w->y, w->w, w->h)) continue;
             w->order = ++next_order;
-            if (inside(mouse_x, mouse_y, w->x + w->w - 31, w->y + 4, 27, 25)) close_window(i, 0);
-            else if (inside(mouse_x, mouse_y, w->x + w->w - 61, w->y + 4, 27, 25)) toggle_maximize(i);
-            else if (inside(mouse_x, mouse_y, w->x + w->w - 91, w->y + 4, 27, 25)) close_window(i, 1);
+            if (inside(mouse_x, mouse_y, hit_x + hit_w - 31, hit_y + 4, 27, 25) || inside(mouse_x, mouse_y, w->x + w->w - 31, w->y + 4, 27, 25)) close_window(i, 0);
+            else if (inside(mouse_x, mouse_y, hit_x + hit_w - 61, hit_y + 4, 27, 25) || inside(mouse_x, mouse_y, w->x + w->w - 61, w->y + 4, 27, 25)) toggle_maximize(i);
+            else if (inside(mouse_x, mouse_y, hit_x + hit_w - 91, hit_y + 4, 27, 25) || inside(mouse_x, mouse_y, w->x + w->w - 91, w->y + 4, 27, 25)) close_window(i, 1);
             else if (!w->maximized && !snap_side[i] && inside(mouse_x, mouse_y, w->x + w->w - 21, w->y + w->h - 21, 21, 21)) {
                 resize_app = i;
                 drag_dx = w->x + w->w - mouse_x;
@@ -2452,20 +2465,45 @@ static int animations_pending(void) {
     return 0;
 }
 
+static uint16_t read_frame_counter(void) {
+    out8(0x43, 0x00);
+    uint16_t lo = in8(0x40);
+    uint16_t hi = in8(0x40);
+    return (uint16_t)(lo | (hi << 8));
+}
+
+static int advance_frame_counter(uint16_t sample) {
+    uint32_t elapsed = timer_counter >= sample ? (uint32_t)(timer_counter - sample) : (uint32_t)(timer_counter + 65535u - sample);
+    timer_counter = sample;
+    if (elapsed == 0) {
+        if (++timer_unchanged >= 2048) {
+            timer_unchanged = 0;
+            timer_accum = 0;
+            return 1;
+        }
+        return 0;
+    }
+    timer_unchanged = 0;
+    timer_accum += elapsed;
+    if (timer_accum < 19886) return 0;
+    timer_accum %= 19886;
+    return 1;
+}
+
 static void init_frame_clock(void) {
-    uint8_t speaker = in8(0x61);
-    out8(0x61, (uint8_t)((speaker | 1) & ~2));
-    out8(0x43, 0xb6);
-    out8(0x42, 0x5d);
-    out8(0x42, 0x9b);
-    timer_level = (uint8_t)(in8(0x61) & 0x20);
+    out8(0x43, 0x34);
+    out8(0x40, 0xff);
+    out8(0x40, 0xff);
+    timer_counter = read_frame_counter();
+    timer_accum = 0;
+    timer_poll = 0;
+    timer_unchanged = 0;
 }
 
 static int frame_clock_tick(void) {
-    uint8_t now = (uint8_t)(in8(0x61) & 0x20);
-    if (now == timer_level) return 0;
-    timer_level = now;
-    return 1;
+    if (++timer_poll < 32) return 0;
+    timer_poll = 0;
+    return advance_frame_counter(read_frame_counter());
 }
 
 static void init_cpu(void) {
@@ -2501,12 +2539,12 @@ void kmain(void) {
         }
     }
     notes_len = size(notes);
-    log_write("Cinmix kernel 0.11.2  [i386]");
+    log_write("Cinmix kernel 0.11.3  [i386]");
     log_write("RAM volume mounted at R:");
     init_mouse();
     init_frame_clock();
     refresh_clock();
-    notify("Cinmix 0.11.2 is ready");
+    notify("Cinmix 0.11.3 is ready");
     repaint();
     uint32_t cycles = 0;
     for (;;) {
@@ -2518,7 +2556,7 @@ void kmain(void) {
             if (status & 0x20) handle_mouse_byte(byte);
             else handle_key(byte);
         }
-        int animation_pulse = frame_clock_tick();
+        int animation_pulse = animations_pending() ? frame_clock_tick() : 0;
         if (dirty || (animation_pulse && animations_pending())) {
             animation_step_allowed = animation_pulse;
             repaint();
