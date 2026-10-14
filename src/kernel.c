@@ -67,10 +67,12 @@ static int volume_level = 60;
 static int volume_muted;
 static uint32_t preview_buffer[172 * 92];
 static uint32_t *const canvas = (uint32_t *)0x400000;
-static uint32_t *const blur_canvas = (uint32_t *)0x900000;
 static uint32_t *const desktop_cache = (uint32_t *)0xD00000;
 static int cached_wallpaper = -1;
 static int pointer_only;
+static int taskbar_dirty = 1;
+static uint8_t timer_level;
+static int animation_step_allowed = 1;
 static int pointer_old_x;
 static int pointer_old_y;
 static int pointer_saved;
@@ -234,6 +236,7 @@ static void refresh_clock(void) {
     rtc_two(clock_date + 5, rtc_decimal(month, ctrl));
     rtc_two(clock_date + 8, rtc_decimal(day, ctrl));
     dirty = 1;
+    taskbar_dirty = 1;
 }
 
 static void notify(const char *message) {
@@ -249,6 +252,7 @@ static void notify(const char *message) {
     notification_count++;
     notification_unread = notification_count;
     dirty = 1;
+    taskbar_dirty = 1;
 }
 
 static void notify_app(int id) {
@@ -402,33 +406,30 @@ static void glass(int x, int y, int w, int h, uint32_t tint, int opacity) {
 }
 
 static void blur_region(int x, int y, int w, int h) {
-    int x0 = x - 4 < 0 ? 0 : x - 4;
-    int y0 = y - 4 < 0 ? 0 : y - 4;
-    int x1 = x + w + 4 > sw ? sw : x + w + 4;
-    int y1 = y + h + 4 > sh ? sh : y + h + 4;
-    if (x0 >= x1 || y0 >= y1) return;
-    for (int yy = y0; yy < y1; yy++)
-        for (int xx = x0; xx < x1; xx++)
-            blur_canvas[(size_t)yy * sw + xx] = canvas[(size_t)yy * sw + xx];
-    for (int yy = y > clip_top ? y : clip_top; yy < y + h && yy < clip_bottom; yy++) {
-        for (int xx = x > clip_left ? x : clip_left; xx < x + w && xx < clip_right; xx++) {
-            uint32_t r = 0, g = 0, b = 0;
-            for (int dy = -3; dy <= 3; dy += 3) {
-                int sy = yy + dy;
-                if (sy < y0) sy = y0;
-                if (sy >= y1) sy = y1 - 1;
-                for (int dx = -3; dx <= 3; dx += 3) {
-                    int sx = xx + dx;
-                    if (sx < x0) sx = x0;
-                    if (sx >= x1) sx = x1 - 1;
-                    uint32_t c = blur_canvas[(size_t)sy * sw + sx];
-                    r += (c >> 16) & 255;
-                    g += (c >> 8) & 255;
-                    b += c & 255;
-                }
-            }
-            uint32_t smooth = ((r / 9) << 16) | ((g / 9) << 8) | (b / 9);
-            canvas[(size_t)yy * sw + xx] = smooth;
+    int left = x > clip_left ? x : clip_left;
+    int top = y > clip_top ? y : clip_top;
+    int right = x + w < clip_right ? x + w : clip_right;
+    int bottom = y + h < clip_bottom ? y + h : clip_bottom;
+    if (left < 1) left = 1;
+    if (top < 1) top = 1;
+    if (right > sw - 1) right = sw - 1;
+    if (bottom > sh - 1) bottom = sh - 1;
+    if (left >= right || top >= bottom) return;
+    for (int yy = top; yy < bottom; yy += 2) {
+        int y1 = yy + 1 < bottom ? yy + 1 : yy;
+        for (int xx = left; xx < right; xx += 2) {
+            int x1 = xx + 1 < right ? xx + 1 : xx;
+            uint32_t a = canvas[(size_t)yy * sw + xx];
+            uint32_t b = canvas[(size_t)yy * sw + x1];
+            uint32_t c = canvas[(size_t)y1 * sw + xx];
+            uint32_t d = canvas[(size_t)y1 * sw + x1];
+            uint32_t average = ((((a >> 16 & 255) + (b >> 16 & 255) + (c >> 16 & 255) + (d >> 16 & 255)) >> 2) << 16) |
+                ((((a >> 8 & 255) + (b >> 8 & 255) + (c >> 8 & 255) + (d >> 8 & 255)) >> 2) << 8) |
+                (((a & 255) + (b & 255) + (c & 255) + (d & 255)) >> 2);
+            canvas[(size_t)yy * sw + xx] = average;
+            canvas[(size_t)yy * sw + x1] = average;
+            canvas[(size_t)y1 * sw + xx] = average;
+            canvas[(size_t)y1 * sw + x1] = average;
         }
     }
 }
@@ -1437,7 +1438,6 @@ static void window_content(int app, const Window *w) {
     animated_window_rect(i, &x, &y, &ww, &hh);
     int focused = active_window() == i;
     soft_shadow(x, y, ww, hh, 16, 7);
-    blur_region(x, y, ww, 36);
     round_capture(x + 8, y + 12, ww, hh, 18);
     glass(x + 8, y + 12, ww, hh, 0x06182d, 94);
     round_finish(x + 8, y + 12, ww, hh, 18);
@@ -1739,9 +1739,11 @@ static void move_pointer_only(void) {
         if ((unsigned)px < (unsigned)sw && (unsigned)py < (unsigned)sh)
             canvas[(size_t)py * sw + px] = pointer_back[y][x];
     }
-    present_region(pointer_old_x, pointer_old_y, 12, 18);
+    int old_x = pointer_old_x;
+    int old_y = pointer_old_y;
     clip_full();
     draw_pointer();
+    present_region(old_x, old_y, 12, 18);
     present_region(mouse_x, mouse_y, 12, 18);
     pointer_frames++;
     pointer_only = 0;
@@ -1865,7 +1867,7 @@ static void repaint(void) {
         pointer_saved = 0;
     }
     damage_count = 0;
-    if (!entire) add_damage(0, sh - 52, sw, 52);
+
     int changed_window = 0;
     int order_changed = 0;
     for (int i = 0; i < APPS; i++) {
@@ -1889,6 +1891,11 @@ static void repaint(void) {
         }
     }
     if (!entire) {
+        if (taskbar_dirty || changed_window || order_changed || last_active != active_window() ||
+            last_start != start_open || last_quick != quick_open ||
+            last_notification != notification_open || last_context != context_open || last_hover != task_hover) {
+            add_damage(0, sh - 52, sw, 52);
+        }
         if (order_changed) {
             for (int i = 0; i < APPS; i++) {
                 if (visible[i]) add_window_damage(current[i]);
@@ -1896,7 +1903,7 @@ static void repaint(void) {
             }
         }
         if (!changed_window && !order_changed && !start_open && !context_open && !quick_open && !notification_open &&
-            !last_start && !last_context && !last_quick && !last_notification) {
+            !last_start && !last_context && !last_quick && !last_notification && last_hover == task_hover && !taskbar_dirty) {
             int focus = active_window();
             if (focus >= 0 && visible[focus]) add_window_damage(current[focus]);
             if (last_active >= 0 && last_active != focus && last_window_visible[last_active]) add_window_damage(last_window_rect[last_active]);
@@ -1910,6 +1917,8 @@ static void repaint(void) {
         if (!start_open && !context_open && !quick_open && !notification_open) add_tooltip_damage(task_hover, mouse_x, task_hover >= 0 && windows[task_hover].opened && !windows[task_hover].minimized);
         add_preview_damage(last_snap_side);
         add_preview_damage(snap_preview_side());
+        add_damage(pointer_old_x, pointer_old_y, 12, 18);
+        add_damage(mouse_x, mouse_y, 12, 18);
     }
     if (entire) {
         clip_full();
@@ -1922,11 +1931,13 @@ static void repaint(void) {
             DamageRect d = damage[i];
             clip_left = d.x; clip_top = d.y; clip_right = d.x + d.w; clip_bottom = d.y + d.h;
             draw_scene();
-            present_region(d.x, d.y, d.w, d.h);
         }
         clip_full();
         draw_pointer();
-        present_region(mouse_x, mouse_y, 12, 18);
+        for (int i = 0; i < damage_count; i++) {
+            DamageRect d = damage[i];
+            present_region(d.x, d.y, d.w, d.h);
+        }
         damage_frames++;
     }
     for (int i = 0; i < APPS; i++) {
@@ -1951,18 +1962,23 @@ static void repaint(void) {
     frame_wallpaper = wallpaper;
     frame_valid = 1;
     pointer_only = 0;
+    taskbar_dirty = 0;
     dirty = 0;
-    for (int i = 0; i < APPS; i++) {
-        if (anim_ticks[i] > 0) {
-            anim_ticks[i]--;
-            dirty = 1;
-            if (!anim_ticks[i]) anim_visible[i] = 0;
+    if (animation_step_allowed) {
+        for (int i = 0; i < APPS; i++) {
+            if (anim_ticks[i] > 0) {
+                anim_ticks[i]--;
+                if (!anim_ticks[i]) {
+                    anim_visible[i] = 0;
+                    dirty = 1;
+                }
+            }
         }
+        if (start_anim > 0) start_anim--;
+        if (context_anim > 0) context_anim--;
+        if (quick_anim > 0) quick_anim--;
+        if (notification_anim > 0) notification_anim--;
     }
-    if (start_anim > 0) { start_anim--; dirty = 1; }
-    if (context_anim > 0) { context_anim--; dirty = 1; }
-    if (quick_anim > 0) { quick_anim--; dirty = 1; }
-    if (notification_anim > 0) { notification_anim--; dirty = 1; }
 }
 
 static int inside(int px, int py, int x, int y, int w, int h) {
@@ -2430,6 +2446,28 @@ static void init_mouse(void) {
     write_mouse(0xf4);
 }
 
+static int animations_pending(void) {
+    if (start_anim || context_anim || quick_anim || notification_anim) return 1;
+    for (int i = 0; i < APPS; i++) if (anim_ticks[i] > 0) return 1;
+    return 0;
+}
+
+static void init_frame_clock(void) {
+    uint8_t speaker = in8(0x61);
+    out8(0x61, (uint8_t)((speaker | 1) & ~2));
+    out8(0x43, 0xb6);
+    out8(0x42, 0x5d);
+    out8(0x42, 0x9b);
+    timer_level = (uint8_t)(in8(0x61) & 0x20);
+}
+
+static int frame_clock_tick(void) {
+    uint8_t now = (uint8_t)(in8(0x61) & 0x20);
+    if (now == timer_level) return 0;
+    timer_level = now;
+    return 1;
+}
+
 static void init_cpu(void) {
     uint32_t a, b, c, d;
     __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0));
@@ -2463,11 +2501,12 @@ void kmain(void) {
         }
     }
     notes_len = size(notes);
-    log_write("Cinmix kernel 0.11  [i386]");
+    log_write("Cinmix kernel 0.11.2  [i386]");
     log_write("RAM volume mounted at R:");
     init_mouse();
+    init_frame_clock();
     refresh_clock();
-    notify("Cinmix 0.11 is ready");
+    notify("Cinmix 0.11.2 is ready");
     repaint();
     uint32_t cycles = 0;
     for (;;) {
@@ -2479,8 +2518,12 @@ void kmain(void) {
             if (status & 0x20) handle_mouse_byte(byte);
             else handle_key(byte);
         }
-        if (dirty) repaint();
-        else if (pointer_only) move_pointer_only();
+        int animation_pulse = frame_clock_tick();
+        if (dirty || (animation_pulse && animations_pending())) {
+            animation_step_allowed = animation_pulse;
+            repaint();
+            animation_step_allowed = 1;
+        } else if (pointer_only) move_pointer_only();
         __asm__ volatile("pause");
     }
 }
