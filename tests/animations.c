@@ -127,6 +127,7 @@ int main(void) {
     handle_right_click();
     check(context_open);
     frame();
+    mouse_x = 600; mouse_y = 400;
     handle_click();
     check(!context_open);
     frames(2);

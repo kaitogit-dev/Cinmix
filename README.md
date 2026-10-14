@@ -1,32 +1,37 @@
-# Cinmix 0.14
+# Cinmix 0.15 — Dark Aero
 
-Cinmix is a freestanding 32-bit x86 desktop operating system, booted from a legacy BIOS El Torito ISO. The preferred display is now **1920 × 1080 at 32-bit color**, with a Windows 7 Aero / Windows 11-inspired interface, centered icon-only taskbar, anti-aliased controls, and animated windows.
+Cinmix is a freestanding 32-bit x86 BIOS desktop operating system. It prefers a 1920×1080×32 VBE or Bochs-compatible graphics mode, with lower-resolution fallbacks. The interface combines Aero-style glass, rounded antialiased edges, a centered icon-only taskbar, and animated application windows.
 
-## New in 0.14
+## What is new in 0.15
 
-- Prefer **1920 × 1080 × 32** through VBE mode discovery or Bochs-compatible graphics registers. The 1080p framebuffer pitch is **7680 bytes per row**. A lower VBE resolution or VGA fallback remains available if the emulator does not support full HD; the OS does not falsely stretch lower-resolution modes.
-- Lifted the renderer's old 1280 × 900 ceiling and expanded the default app windows to 1050 × 700 at full HD. The native regression test allocates both 1920 × 1080 backbuffers and checks exact framebuffer copies, controls and partial redraws.
-- **120 Hz animation scheduler** in place of 60 Hz. Windows now open in three eased steps (about 25 ms in ideal timing), maximize/snap in four steps, and close/minimize in five steps. Panel tweens use six steps (about 50 ms). Real timing still depends on emulator rendering speed.
-- Keep the taskbar hover delay at approximately **one second** by adjusting it to 120 animation-clock pulses.
-- Window rendering now avoids large, unnecessary translucent blends behind opaque window interiors, concentrating those glass passes on edges and title bars to reduce cost at 1080p.
-- Preserved the cursor, active/hover taskbar glass highlights, minimized and closing window tweens, Alt+Tab, Quick Panel, Notification Center, desktop icons, and existing applications.
+**Dark Aero** is a complete fourth color scheme alongside Aero, Silver and Midnight. It introduces a dark-blue translucent wallpaper, navy title bars and window content, glass panels, dark text fields and buttons, and high-contrast light text throughout Files, Notes, System, Calculator, Appearance, Start, Run, Quick Panel, Notification Center, Alt+Tab and taskbar tooltips. Dark Aero uses the existing configurable accent colors and glass strength. Switching back restores the last selected light theme rather than resetting other appearance preferences.
 
-## Existing features
+**Dark Aero controls:**
 
-Ten built-in apps, a searchable Start menu, draggable and resizable windows, minimize, close, maximize, snap, animated Show Desktop, right-click desktop context menu, reversible open/close panels, keyboard desktop focus, visual Alt+Tab, translucent themes, wallpaper and accent settings, Run dialog (`Ctrl+R`), and delayed taskbar previews.
+- In Appearance, click the **Dark Aero** button at the top right of Color Scheme.
+- In the Quick Panel (click the clock), click **Dark Aero: On/Off**.
+- Right-click an empty desktop area and choose **Toggle Dark Aero**.
+- Press **Ctrl+Alt+M** at any time to toggle Dark Aero.
+- Type **dark** or **light** in Run (`Ctrl+R`) or Console.
 
-## Build
+**Quiet mode / Do Not Disturb:** The Quick Panel now includes **Quiet: On/Off**. New notifications are still saved in the Notification Center but do not create unread badges while quiet mode is enabled. Existing notifications can still be read and dismissed normally. Quiet mode can also be toggled with `quiet` in Run or Console.
 
-Requires GCC, GNU binutils and Python 3 on Linux, including `-m32` compilation support.
+**New window shortcuts:** **Ctrl+Alt+Up** maximizes or restores the active window, and **Ctrl+Alt+Down** minimizes it with the existing closing tween. Existing left/right snapping shortcuts remain unchanged.
+
+**Render optimization:** Wallpaper caching now distinguishes light and dark appearances without regenerating a full-HD wallpaper when switching between light themes. The renderer preserves partially redrawn window and panel regions and the cursor compositing fixes from previous versions.
+
+## Existing desktop features
+
+Ten built-in apps, searchable Start menu, desktop right-click menu, reversible window/panel tweens, dragging, resizing, snapping, minimize and restore, animated Show Desktop, running and hovered taskbar highlights, delayed taskbar tooltips, notification management, quick volume UI, wallpapers, glass strength and accent selection, Run dialog, visual Alt+Tab, and keyboard desktop icon selection.
+
+## Build and verification
+
+On a Linux system with GCC, GNU binutils, Python 3 and 32-bit cross-compilation support:
 
 ```sh
 make verify
 ```
 
-The resulting image is `Cinmix-0.14.iso`. `make verify` checks the El Torito image and bootloader, validates the 1920 × 1080 mode-selection instructions, and runs native regression suites at 720p as well as a real 1080p framebuffer test.
+This creates `Cinmix-0.15.iso`. Tests validate ISO9660 and El Torito structures, BIOS video mode selection, panel and window controls, 1920×1080 framebuffer composition, both color modes, theme input controls, quiet notifications and the new keyboard shortcuts. The tests run against the native software compositor and simulated input; they **do not establish actual boot or frame-rate smoothness in a BIOS emulator**. The emulator must provide a suitable 1080p framebuffer mode or Cinmix falls back to a supported resolution. At least 128 MB of RAM is recommended. Preferences remain in RAM and reset when Cinmix reboots.
 
-### Testing limitation
-
-The full-resolution compositor, event handling, and ISO structure have been tested natively. **An actual BIOS emulator boot has not been tested in this environment.** The emulator must support a 1920 × 1080 × 32 graphics mode and enough video memory (roughly 8 MiB for one framebuffer), or the firmware will select a supported fallback. The emulator also needs sufficient system RAM for two 1080p software buffers and the OS.
-
-The software volume interface does not yet output to an audio device driver. Font licensing is in `FONT-LICENSE.txt`.
+Software volume controls are interface state only; an audio device driver has not been implemented. Font licensing information is in `FONT-LICENSE.txt`.

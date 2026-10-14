@@ -9,16 +9,19 @@ extern uint8_t boot_bpp;
 extern const uint8_t cinmix_font[96][16][8];
 
 static int theme;
+static int previous_theme;
+static int do_not_disturb;
 static int wallpaper;
 static int glass_level = 2;
 static int accent_index;
 static const uint32_t accent_colors[4] = {0x2167b3,0x178f99,0x7852ba,0xcf7343};
 static int desktop_hidden;
 static int desktop_saved[11];
-static const uint32_t palette[3][13] = {
+static const uint32_t palette[4][13] = {
     {0x243d60,0x537caa,0xa7bfd8,0xf9fcff,0xffffff,0x285f9a,0xd4e2ef,0xf2f7fc,0x2167b3,0x7ec5fc,0x10223b,0x3067a0,0xe5f0fc},
     {0x3a597c,0x6e93b4,0xb7cadf,0xf8fbfe,0xffffff,0x638eac,0xdbe5ed,0xfafcff,0x3d729f,0x9ed6fa,0x213b56,0x7797b8,0xeef4fa},
-    {0x1d2b4a,0x435c86,0x8ea7cc,0xeef4fc,0xffffff,0x122c58,0xb5c5df,0xe3eaf7,0x4679c5,0x93b9fb,0x07152c,0x22416c,0xdce7fa}
+    {0x1d2b4a,0x435c86,0x8ea7cc,0xeef4fc,0xffffff,0x122c58,0xb5c5df,0xe3eaf7,0x4679c5,0x93b9fb,0x07152c,0x22416c,0xdce7fa},
+    {0xe9f2ff,0xb9d6f0,0x97b4d0,0x182637,0xf4faff,0x132b44,0x39546f,0x26384d,0x5fa9f2,0xa4dcff,0x0b1729,0x243955,0x304863}
 };
 #define INK palette[theme][0]
 #define INK2 palette[theme][1]
@@ -33,6 +36,13 @@ static const uint32_t palette[3][13] = {
 #define BLACK palette[theme][10]
 #define DESK2 palette[theme][11]
 #define TILE palette[theme][12]
+#define NIGHT (theme == 3)
+#define UI_CARD (NIGHT ? 0x293b50 : 0xf3f9fe)
+#define UI_FIELD (NIGHT ? 0x24354b : 0xf8fcff)
+#define UI_HOVER (NIGHT ? 0x3a5471 : 0xd7edfb)
+#define UI_EDGE (NIGHT ? 0x5b7b9b : 0x7daed1)
+#define UI_PANEL (NIGHT ? 0x1a2c43 : 0xc7e2f5)
+#define UI_HEAD (NIGHT ? 0x15314e : 0x1e5f93)
 
 #define FILES 0
 #define NOTES 1
@@ -76,6 +86,7 @@ static uint32_t preview_buffer[172 * 92];
 static uint32_t *const canvas = (uint32_t *)0x400000;
 static uint32_t *const desktop_cache = (uint32_t *)0xD00000;
 static int cached_wallpaper = -1;
+static int cached_wallpaper_night = -1;
 static int pointer_only;
 static int taskbar_dirty = 1;
 static uint16_t timer_counter;
@@ -326,13 +337,33 @@ static void notify(const char *message) {
     copy(notification_text[notification_count], message, 48);
     copy(notification_time[notification_count], clock_time, 9);
     notification_count++;
-    notification_unread = notification_count;
+    if (!do_not_disturb) notification_unread = notification_count;
     dirty = 1;
     taskbar_dirty = 1;
 }
 
 static void toggle_desktop(void);
 static void open_window(int app);
+
+static void select_theme(int selected) {
+    if (selected < 0 || selected > 3) return;
+    if (selected != 3) previous_theme = selected;
+    if (theme == selected) return;
+    theme = selected;
+    dirty = 1;
+    taskbar_dirty = 1;
+}
+
+static void toggle_dark_aero(void) {
+    select_theme(NIGHT ? previous_theme : 3);
+}
+
+static void toggle_quiet(void) {
+    do_not_disturb = !do_not_disturb;
+    if (do_not_disturb) notification_unread = 0;
+    dirty = 1;
+    taskbar_dirty = 1;
+}
 
 static void signed_number(char *out, int32_t n) {
     if (n < 0) { out[0] = '-'; number(out + 1, (uint32_t)(-(int64_t)n)); }
@@ -897,8 +928,10 @@ static void taskbar_mark(int cx, int cy) {
 static void regenerate_wallpaper(void) {
     static const uint32_t top_colors[3] = {0x08214e,0x16446a,0x081a32};
     static const uint32_t low_colors[3] = {0x236ca9,0x5ea7be,0x374d8b};
-    uint32_t top = top_colors[wallpaper];
-    uint32_t bottom = low_colors[wallpaper];
+    static const uint32_t night_top[3] = {0x030918,0x061627,0x060b1c};
+    static const uint32_t night_bottom[3] = {0x113252,0x104054,0x1b244d};
+    uint32_t top = NIGHT ? night_top[wallpaper] : top_colors[wallpaper];
+    uint32_t bottom = NIGHT ? night_bottom[wallpaper] : low_colors[wallpaper];
     for (int y = 0; y < sh; y++) {
         uint32_t c = blend(top, bottom, y * 235 / sh);
         for (int x = 0; x < sw; x++) {
@@ -907,7 +940,7 @@ static void regenerate_wallpaper(void) {
             int d = (glow_x * glow_x / (sw > 0 ? sw : 1)) + (glow_y * glow_y / (sh > 0 ? sh : 1));
             int v = 80 - d / 3;
             if (v < 0) v = 0;
-            uint32_t sky = wallpaper == 2 ? 0x839be6 : wallpaper == 1 ? 0xbbf5f7 : 0x7cd1f5;
+            uint32_t sky = NIGHT ? (wallpaper == 2 ? 0x3d5391 : wallpaper == 1 ? 0x327f9d : 0x2b6fa6) : (wallpaper == 2 ? 0x839be6 : wallpaper == 1 ? 0xbbf5f7 : 0x7cd1f5);
             canvas[(size_t)y * sw + x] = blend(c, sky, v);
         }
     }
@@ -921,7 +954,7 @@ static void regenerate_wallpaper(void) {
             int weight = 99 - (x - edge) * 99 / spread;
             if (weight < 0) weight = 0;
             uint32_t a = canvas[(size_t)y * sw + x];
-            pixel(x,y,blend(a,wallpaper == 2 ? 0xaec2ff : 0xc9f2fb,weight));
+            pixel(x,y,blend(a, NIGHT ? 0x5b91c2 : wallpaper == 2 ? 0xaec2ff : 0xc9f2fb, NIGHT ? weight * 3 / 4 : weight));
         }
     }
     for (int y = sh / 3; y < bottom_y; y++) {
@@ -939,13 +972,14 @@ static void regenerate_wallpaper(void) {
 }
 
 static void draw_wallpaper(void) {
-    if (cached_wallpaper != wallpaper) {
+    if (cached_wallpaper != wallpaper || cached_wallpaper_night != NIGHT) {
         int old_l = clip_left, old_t = clip_top, old_r = clip_right, old_b = clip_bottom;
         clip_full();
         regenerate_wallpaper();
         for (size_t k = 0; k < (size_t)sw * sh; k++) desktop_cache[k] = canvas[k];
         clip_left = old_l; clip_top = old_t; clip_right = old_r; clip_bottom = old_b;
         cached_wallpaper = wallpaper;
+        cached_wallpaper_night = NIGHT;
         desktop_regenerations++;
     }
     for (int y = clip_top; y < clip_bottom; y++) {
@@ -971,7 +1005,7 @@ static void draw_desktop(void) {
         text(sw - 148, sh - 105, "cinmix", 0xd5eeff);
         rect(sw - 148, sh - 84, 69, 1, 0x81ceee);
     }
-    glass(0, sh - 52, sw, 52, theme == 2 ? 0x16283d : 0x12344f, 188 + glass_level * 15);
+    glass(0, sh - 52, sw, 52, NIGHT ? 0x071527 : theme == 2 ? 0x16283d : 0x12344f, 188 + glass_level * 15);
     glass(0, sh - 52, sw, 17, 0xffffff, 48);
     glass(0, sh - 34, sw, 10, 0x1b5285, 45);
     rect(0, sh - 52, sw, 1, 0xd1eefa);
@@ -1005,11 +1039,11 @@ static void draw_desktop(void) {
     }
     if (sw >= 700) {
         int bx = sw - 171;
-        if (notification_open) rounded(bx - 3, sh - 45, 39, 39, 10, 0x5486a8);
+        if (notification_open || do_not_disturb) rounded(bx - 3, sh - 45, 39, 39, 10, NIGHT ? 0x254968 : 0x5486a8);
         circle(bx + 17, sh - 29, 8, 0xb6deee);
         rounded(bx + 11, sh - 23, 13, 3, 1, 0xffffff);
         circle(bx + 17, sh - 18, 2, 0xffffff);
-        if (notification_unread) {
+        if (notification_unread && !do_not_disturb) {
             circle(bx + 29, sh - 40, 8, 0xe07760);
             char n[4]; number(n, (uint32_t)notification_unread);
             text(bx + 25, sh - 47, n, WHITE);
@@ -1066,9 +1100,12 @@ static void execute_command(void) {
     log_write(linebuf);
     if (!console_len) return;
     if (same(console_input, "help")) print_info();
-    else if (same(console_input, "ver")) log_write("Cinmix 0.14  |  kernel 0.14  |  i386");
+    else if (same(console_input, "ver")) log_write("Cinmix 0.15  |  kernel 0.15  |  i386");
     else if (same(console_input, "clear")) log_count = 0;
     else if (same(console_input, "context")) log_write("Right click on desktop");
+    else if (same(console_input, "dark")) { select_theme(3); log_write("Dark Aero enabled"); }
+    else if (same(console_input, "light")) { select_theme(previous_theme); log_write("Light Aero enabled"); }
+    else if (same(console_input, "quiet")) { toggle_quiet(); log_write(do_not_disturb ? "Quiet mode on" : "Quiet mode off"); }
     else if (same(console_input, "resize")) log_write("Drag window lower-right corner");
     else if (same(console_input, "quick")) log_write("Clock opens Quick Panel");
     else if (same(console_input, "notify")) { notify("Notification from Console"); log_write("Notification delivered"); }
@@ -1076,7 +1113,7 @@ static void execute_command(void) {
         log_write("/ram/readme.txt");
         log_write("/ram/boot.log");
         log_write("/ram/notes.txt");
-    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix kernel 0.14; El Torito; RAM volume");
+    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix kernel 0.15; El Torito; RAM volume");
     else if (same(console_input, "cat boot.log")) log_write("El Torito -> kernel -> protected mode -> UI");
     else if (same(console_input, "cat notes.txt")) {
         char one[72] = "";
@@ -1204,6 +1241,9 @@ static int app_from_command(const char *name) {
 static void run_command(void) {
     if (!run_len) { run_open = 0; dirty = 1; return; }
     if (same_fold(run_input, "desktop")) { run_open = 0; toggle_desktop(); return; }
+    if (same_fold(run_input, "dark")) { select_theme(3); run_open = 0; return; }
+    if (same_fold(run_input, "light")) { select_theme(previous_theme); run_open = 0; return; }
+    if (same_fold(run_input, "quiet")) { toggle_quiet(); run_open = 0; return; }
     if (same_fold(run_input, "reboot")) reboot_machine();
     if (same_fold(run_input, "shutdown") || same_fold(run_input, "halt")) halt_machine();
     int app = app_from_command(run_input);
@@ -1346,7 +1386,7 @@ static void window_content(int app, const Window *w) {
         rect(x + 138, y + 38, cw - 148, 1, HAIR);
         for (int i = 0; i < 3; i++) {
             int yy = y + 52 + i * 37;
-            if (selected_file == i) rounded(x + 135, yy - 4, cw - 147, 32, 8, 0xd1dce1);
+            if (selected_file == i) rounded(x + 135, yy - 4, cw - 147, 32, 8, NIGHT ? 0x36506d : 0xd1dce1);
             rounded(x + 148, yy + 1, 15, 18, 4, WHITE);
             outline(x + 148, yy + 1, 15, 18, STEEL);
             rect(x + 151, yy + 6, 9, 1, HAIR);
@@ -1357,7 +1397,7 @@ static void window_content(int app, const Window *w) {
         rect(x + 137, yy, cw - 150, 1, HAIR);
         text(x + 146, yy + 11, "PREVIEW", STEEL);
         if (selected_file == 0) {
-            text(x + 146, yy + 36, "Cinmix 0.14", INK);
+            text(x + 146, yy + 36, "Cinmix 0.15", INK);
             text(x + 146, yy + 57, "i386 / El Torito CD", STEEL);
         } else if (selected_file == 1) {
             text(x + 146, yy + 36, "Protected mode", INK);
@@ -1414,10 +1454,10 @@ static void window_content(int app, const Window *w) {
     } else if (app == SYSTEM) {
         rect(x, y, cw, 4, BLUE);
         big_text(x + 21, y + 22, "CINMIX", INK);
-        text(x + 24, y + 62, "RELEASE 0.14", STEEL);
+        text(x + 24, y + 62, "RELEASE 0.15", STEEL);
         rect(x + 21, y + 91, cw - 42, 1, HAIR);
         text(x + 24, y + 106, "Kernel", STEEL);
-        text(x + 166, y + 106, "Cinmix 0.14", INK);
+        text(x + 166, y + 106, "Cinmix 0.15", INK);
         text(x + 24, y + 134, "Target", STEEL);
         text(x + 166, y + 134, "i386 protected", INK);
         text(x + 24, y + 162, "Firmware", STEEL);
@@ -1443,6 +1483,10 @@ static void window_content(int app, const Window *w) {
         text(x + 22, y + 230, "CMOS clock", STEEL);
     } else if (app == APPEAR) {
         text(x + 24, y + 19, "COLOR SCHEME", STEEL);
+        rounded(x + cw - 207, y + 8, 181, 35, 10, NIGHT ? 0x344d69 : LIGHT);
+        outline(x + cw - 207, y + 8, 181, 35, NIGHT ? BLUE : HAIR);
+        rect(x + cw - 194, y + 18, 15, 15, NIGHT ? 0x78b9f2 : 0x263850);
+        text(x + cw - 171, y + 18, NIGHT ? "Dark Aero: ON" : "Dark Aero: OFF", INK);
         rect(x + 22, y + 51, cw - 44, 1, HAIR);
         const char *labels[3] = {"Aero", "Silver", "Midnight"};
         const uint32_t samples[3][3] = {
@@ -1588,20 +1632,20 @@ static void window_content(int app, const Window *w) {
     glass(x + ww - 4, y + 14, 8, hh - 16, 0x0b2d50, 47);
     round_finish(x + 4, y + 6, ww, hh, 18);
     round_capture(x, y, ww, hh, 16);
-    glass(x, y, ww, 35, focused ? 0xb3dbf7 : 0xcbd5e1, 120 + glass_level * 25);
-    glass(x, y + 35, 2, hh - 35, focused ? 0xb3dbf7 : 0xcbd5e1, 120 + glass_level * 25);
-    glass(x + ww - 2, y + 35, 2, hh - 35, focused ? 0xb3dbf7 : 0xcbd5e1, 120 + glass_level * 25);
-    glass(x + 2, y + hh - 2, ww - 4, 2, focused ? 0xb3dbf7 : 0xcbd5e1, 120 + glass_level * 25);
+    glass(x, y, ww, 35, NIGHT ? (focused ? 0x27567e : 0x21354b) : (focused ? 0xb3dbf7 : 0xcbd5e1), 120 + glass_level * 25);
+    glass(x, y + 35, 2, hh - 35, NIGHT ? 0x345a7e : (focused ? 0xb3dbf7 : 0xcbd5e1), 120 + glass_level * 25);
+    glass(x + ww - 2, y + 35, 2, hh - 35, NIGHT ? 0x345a7e : (focused ? 0xb3dbf7 : 0xcbd5e1), 120 + glass_level * 25);
+    glass(x + 2, y + hh - 2, ww - 4, 2, NIGHT ? 0x345a7e : (focused ? 0xb3dbf7 : 0xcbd5e1), 120 + glass_level * 25);
     glass(x + 1, y + 1, ww - 2, 1, 0xffffff, 120);
     rect(x + 1, y + hh - 2, ww - 2, 1, 0x7893ac);
     rect(x, y + 1, 1, hh - 2, 0x527493);
     rect(x + ww - 1, y + 1, 1, hh - 2, 0x527493);
-    glass(x + 2, y + 2, ww - 4, 31, focused ? 0x2e8ac0 : 0x7794a9, focused ? 71 : 52);
+    glass(x + 2, y + 2, ww - 4, 31, NIGHT ? (focused ? 0x135b93 : 0x2b455f) : (focused ? 0x2e8ac0 : 0x7794a9), focused ? 71 : 52);
     glass(x + 2, y + 2, ww - 4, 12, 0xffffff, 47);
     rect(x + 2, y + 33, ww - 4, 1, 0x6488a5);
     rounded(x + 10, y + 9, 18, 18, 5, 0x2e83b9);
     draw_mark(x + 13, y + 10, WHITE);
-    text(x + 39, y + 11, app_name[i], 0x34516d);
+    text(x + 39, y + 11, app_name[i], NIGHT ? 0x071625 : 0x34516d);
     text(x + 38, y + 10, app_name[i], WHITE);
     int by = y + 4;
     round_capture(x + ww - 91, by, 27, 25, 8);
@@ -1649,10 +1693,10 @@ static void draw_menu(void) {
     glass(mx + 8, my + 9, mw, mh, 0x071a2d, 102);
     round_finish(mx + 8, my + 9, mw, mh, 18);
     round_capture(mx, my, mw, mh, 18);
-    glass_frame(mx, my, mw, mh, 0x96d4fa, 148 + glass_level * 17);
-    glass(mx + 2, my + 2, mw - 4, 65, 0x0b5e98, 163);
+    glass_frame(mx, my, mw, mh, NIGHT ? 0x183552 : 0x96d4fa, 148 + glass_level * 17);
+    glass(mx + 2, my + 2, mw - 4, 65, UI_HEAD, 163);
     glass(mx + 2, my + 2, mw - 4, 20, 0xffffff, 65);
-    glass(mx + 6, my + 68, mw - 12, mh - 127, 0xf6fbff, 246);
+    glass(mx + 6, my + 68, mw - 12, mh - 127, NIGHT ? 0x19283c : 0xf6fbff, 246);
     rounded(mx + 16, my + 15, 38, 38, 10, 0x1673ae);
     draw_mark(mx + 23, my + 23, WHITE);
     text(mx + 66, my + 14, "Cinmix", WHITE);
@@ -1665,7 +1709,7 @@ static void draw_menu(void) {
         int app = menu_row_app(k);
         if (app < 0) break;
         int py = my + 70 + k * row_h;
-        if (menu_query_len && k == 0) rounded(mx + 10, py, list_width - 7, row_h - 2, 8, 0xc3e4f8);
+        if (menu_query_len && k == 0) rounded(mx + 10, py, list_width - 7, row_h - 2, 8, NIGHT ? 0x304f6e : 0xc3e4f8);
         rounded(mx + 23, py + 5, 17, 17, 5, app == FILES ? 0xc49b62 : 0x3d93bf);
         rect(mx + 27, py + 9, 9, 2, 0xeafaff);
         text(mx + 52, py + (row_h - 16) / 2, app_name[app], INK);
@@ -1674,7 +1718,7 @@ static void draw_menu(void) {
     if (mh >= 420) {
         glass(mx + 303, my + 69, mw - 310, mh - 126, 0x6da6cf, 85);
         rect(mx + 301, my + 67, 1, mh - 134, 0x7babc9);
-        text(mx + 318, my + 84, "PLACES", 0x255777);
+        text(mx + 318, my + 84, "PLACES", NIGHT ? 0xa6c6e2 : 0x255777);
         text(mx + 318, my + 123, "Files", INK);
         text(mx + 318, my + 163, "Notes", INK);
         text(mx + 318, my + 203, "System", INK);
@@ -1684,19 +1728,19 @@ static void draw_menu(void) {
         text(mx + 318, my + 339, "Shut down", INK);
     }
     glass(mx + 2, my + mh - 59, mw - 4, 57, 0x225f93, 137);
-    rounded(mx + 15, my + mh - 49, list_width - 13, 35, 10, 0xf8fcff);
-    outline(mx + 15, my + mh - 49, list_width - 13, 35, 0x7daed1);
+    rounded(mx + 15, my + mh - 49, list_width - 13, 35, 10, UI_FIELD);
+    outline(mx + 15, my + mh - 49, list_width - 13, 35, UI_EDGE);
     circle(mx + 28, my + mh - 32, 6, 0x488db8);
     line(mx + 33, my + mh - 27, mx + 37, my + mh - 23, 0x488db8);
     text(mx + 45, my + mh - 40, menu_query_len ? menu_query : "Search programs", menu_query_len ? INK : 0x6387a8);
     round_finish(mx, my, mw, mh, 18);
 }
 
-static int context_height(void) { return 170; }
+static int context_height(void) { return 208; }
 static int context_width(void) { return 208; }
 
 static int quick_width(void) { return 262; }
-static int quick_height(void) { return 302; }
+static int quick_height(void) { return 422; }
 
 static void draw_context(void) {
     if (!panel_visible(PANEL_CONTEXT)) return;
@@ -1709,13 +1753,13 @@ static void draw_context(void) {
     glass(x + 5, y + 7, w, h, 0x05172c, 100);
     round_finish(x + 5, y + 7, w, h, 15);
     round_capture(x, y, w, h, 15);
-    glass_frame(x, y, w, h, 0xbeddf1, 188);
+    glass_frame(x, y, w, h, UI_PANEL, 188);
     rounded(x + 6, y + 6, w - 12, h - 12, 10, PAPER);
-    const char *items[4] = {"Refresh", "Appearance", "Windows", "Show desktop"};
-    for (int i = 0; i < 4; i++) {
+    const char *items[5] = {"Refresh", "Appearance", "Windows", "Show desktop", "Toggle Dark Aero"};
+    for (int i = 0; i < 5; i++) {
         int py = y + 13 + i * 38;
         if (mouse_x >= x + 7 && mouse_x < x + w - 7 && mouse_y >= py && mouse_y < py + 34)
-            rounded(x + 8, py, w - 16, 33, 10, 0xd7edfb);
+            rounded(x + 8, py, w - 16, 33, 10, UI_HOVER);
         text(x + 23, py + 9, items[i], INK);
     }
     round_finish(x, y, w, h, 15);
@@ -1733,31 +1777,38 @@ static void draw_quick(void) {
     glass(x + 6, y + 8, w, h, 0x061528, 100);
     round_finish(x + 6, y + 8, w, h, 16);
     round_capture(x, y, w, h, 16);
-    glass_frame(x, y, w, h, 0xc7e2f5, 192);
-    glass(x + 2, y + 2, w - 4, 46, 0x1e5f93, 145);
+    glass_frame(x, y, w, h, UI_PANEL, 192);
+    glass(x + 2, y + 2, w - 4, 46, UI_HEAD, 145);
     glass(x + 2, y + 2, w - 4, 14, 0xffffff, 56);
     text(x + 18, y + 12, clock_time, WHITE);
     text(x + 18, y + 29, clock_date, 0xd9edfb);
-    rounded(x + 16, y + 60, 230, 34, 10, 0xf6fbff);
-    rounded(x + 16, y + 102, 110, 34, 10, 0xddecfa);
-    rounded(x + 136, y + 102, 110, 34, 10, 0xddecfa);
-    rounded(x + 16, y + 144, 230, 28, 10, 0xddecfa);
+    rounded(x + 16, y + 60, 230, 34, 10, UI_CARD);
+    rounded(x + 16, y + 102, 110, 34, 10, UI_CARD);
+    rounded(x + 136, y + 102, 110, 34, 10, UI_CARD);
+    rounded(x + 16, y + 144, 230, 28, 10, UI_CARD);
     text(x + 29, y + 70, "Open Calendar", INK);
     text(x + 29, y + 112, "Appearance", INK);
     text(x + 165, y + 112, "Desktop", INK);
     text(x + 29, y + 151, glass_level == 0 ? "Glass: Light" : glass_level == 1 ? "Glass: Medium" : "Glass: Strong", INK);
     text(x + 16, y + 187, "VOLUME (UI ONLY)", WHITE);
-    rounded(x + 16, y + 211, 46, 31, 8, 0xddecfa);
-    rounded(x + 72, y + 211, 46, 31, 8, 0xddecfa);
-    rounded(x + 129, y + 211, 117, 31, 8, 0xddecfa);
+    rounded(x + 16, y + 211, 46, 31, 8, UI_CARD);
+    rounded(x + 72, y + 211, 46, 31, 8, UI_CARD);
+    rounded(x + 129, y + 211, 117, 31, 8, UI_CARD);
     text(x + 35, y + 217, "-", INK);
     text(x + 91, y + 217, "+", INK);
     text(x + 146, y + 217, volume_muted ? "Unmute" : "Mute", INK);
     char level[8]; number(level, (uint32_t)(volume_muted ? 0 : volume_level));
     text(x + 190, y + 187, level, WHITE);
     text(x + 16, y + 255, "TOOLS", WHITE);
-    rounded(x + 16, y + 271, 230, 31, 8, 0xddecfa);
+    rounded(x + 16, y + 271, 230, 31, 8, UI_CARD);
     text(x + 29, y + 278, "Run command", INK);
+    text(x + 16, y + 319, "DISPLAY AND ALERTS", WHITE);
+    rounded(x + 16, y + 338, 230, 34, 10, UI_CARD);
+    text(x + 29, y + 347, NIGHT ? "Dark Aero: On" : "Dark Aero: Off", INK);
+    rounded(x + 164, y + 345, 69, 20, 9, NIGHT ? BLUE : HAIR);
+    circle(NIGHT ? x + 223 : x + 174, y + 355, 7, WHITE);
+    rounded(x + 16, y + 375, 230, 34, 10, UI_CARD);
+    text(x + 29, y + 384, do_not_disturb ? "Quiet: On" : "Quiet: Off", INK);
     round_finish(x, y, w, h, 16);
 }
 
@@ -1774,18 +1825,19 @@ static void draw_notifications(void) {
     soft_shadow(x, y, w, h, 17, 8);
     blur_region(x, y, w, 56);
     round_capture(x, y, w, h, 17);
-    glass_frame(x, y, w, h, 0xb6d9ef, 205);
-    glass(x + 2, y + 2, w - 4, 52, 0x1e5f93, 154);
+    glass_frame(x, y, w, h, UI_PANEL, 205);
+    glass(x + 2, y + 2, w - 4, 52, UI_HEAD, 154);
     text(x + 18, y + 17, "NOTIFICATIONS", WHITE);
     text(x + w - 93, y + 18, "Clear all", WHITE);
     for (int i = 0; i < notification_count && i < 5; i++) {
         int py = y + 61 + i * 55;
-        rounded(x + 12, py, w - 24, 49, 10, 0xecf5fc);
+        rounded(x + 12, py, w - 24, 49, 10, UI_CARD);
         rounded(x + 13, py + 1, 5, 47, 2, BLUE);
         text(x + 28, py + 9, notification_text[notification_count - 1 - i], INK);
         text(x + 28, py + 28, notification_time[notification_count - 1 - i], STEEL);
         text(x + w - 31, py + 12, "x", STEEL);
     }
+    if (do_not_disturb) text(x + 18, y + 37, "Quiet mode is enabled", WHITE);
     if (!notification_count) {
         text(x + 60, y + 156, "You're all caught up", INK);
         text(x + 60, y + 182, "No new notifications", STEEL);
@@ -1820,14 +1872,14 @@ static void draw_run(void) {
     int y = run_top() + panel_shift(PANEL_RUN, 15);
     soft_shadow(x, y, w, h, 16, 8);
     round_capture(x, y, w, h, 15);
-    glass_frame(x, y, w, h, 0xbedcf2, 198);
+    glass_frame(x, y, w, h, UI_PANEL, 198);
     rounded(x + 2, y + 2, w - 4, h - 4, 13, PAPER);
     text(x + 22, y + 18, "Run", INK);
     text(x + 22, y + 40, "Open a program, folder or command.", STEEL);
     rounded(x + 21, y + 67, w - 42, 32, 9, LIGHT);
-    outline(x + 21, y + 67, w - 42, 32, 0xc6dceb);
+    outline(x + 21, y + 67, w - 42, 32, UI_EDGE);
     text(x + 31, y + 76, run_len ? run_input : "files", run_len ? INK : 0x6c87a3);
-    rounded(x + w - 103, y + 108, 80, 25, 7, 0xd8ecfa);
+    rounded(x + w - 103, y + 108, 80, 25, 7, UI_HOVER);
     text(x + w - 78, y + 115, "Launch", INK);
     round_finish(x, y, w, h, 15);
 }
@@ -1872,13 +1924,13 @@ static void draw_tooltip(void) {
     }
     soft_shadow(x, y, w, h, 11, 4);
     round_capture(x, y, w, h, 11);
-    glass_frame(x, y, w, h, 0xecf5fc, 230);
-    rounded(x + 2, y + 2, w - 4, h - 4, 9, 0xf3f9fe);
+    glass_frame(x, y, w, h, NIGHT ? 0x1b354e : 0xecf5fc, 230);
+    rounded(x + 2, y + 2, w - 4, h - 4, 9, UI_CARD);
     glass(x + 3, y + 3, w - 6, shown ? 30 : 13, 0xffffff, 62);
     if (shown) {
         draw_task_icon(x + 7, y + 4, hover_app);
         text(x + 48, y + 12, app_name[hover_app], INK);
-        rounded(x + 11, y + 40, 180, 101, 7, 0xb7cfe2);
+        rounded(x + 11, y + 40, 180, 101, 7, NIGHT ? 0x38516a : 0xb7cfe2);
         for (int py = 0; py < 92; py++) {
             int yy = y + 44 + py;
             if (yy < clip_top || yy >= clip_bottom || (unsigned)yy >= (unsigned)sh) continue;
@@ -1905,8 +1957,8 @@ static void draw_switcher(void) {
     int h = switcher_height();
     soft_shadow(x, y, 450, h, 17, 6);
     round_capture(x, y, 450, h, 16);
-    glass_frame(x, y, 450, h, 0x152c47, 230);
-    rounded(x + 2, y + 2, 446, h - 4, 14, 0x183451);
+    glass_frame(x, y, 450, h, NIGHT ? 0x0e2135 : 0x152c47, 230);
+    rounded(x + 2, y + 2, 446, h - 4, 14, NIGHT ? 0x1e3047 : 0x183451);
     text(x + 21, y + 15, "Switch windows", WHITE);
     text(x + 239, y + 15, "Release Alt to switch", 0xb7d5e9);
     for (int i = 0; i < tab_count; i++) {
@@ -2360,6 +2412,8 @@ static void handle_click(void) {
             if (inside(mouse_x, mouse_y, qx + 72, qy + 211, 46, 31)) { volume_level = volume_level <= 90 ? volume_level + 10 : 100; volume_muted = 0; }
             if (inside(mouse_x, mouse_y, qx + 129, qy + 211, 117, 31)) { volume_muted = !volume_muted; }
             if (inside(mouse_x, mouse_y, qx + 16, qy + 271, 230, 31)) { run_open = 1; run_anim = 8; quick_open = 0; dirty = 1; return; }
+            if (inside(mouse_x, mouse_y, qx + 16, qy + 338, 230, 34)) { toggle_dark_aero(); return; }
+            if (inside(mouse_x, mouse_y, qx + 16, qy + 375, 230, 34)) { toggle_quiet(); return; }
             dirty = 1;
             return;
         }
@@ -2370,11 +2424,12 @@ static void handle_click(void) {
     if (context_open) {
         if (inside(mouse_x, mouse_y, context_x, context_y, context_width(), context_height())) {
             int selected = (mouse_y - context_y - 13) / 38;
-            if (mouse_y >= context_y + 13 && selected >= 0 && selected < 4) {
+            if (mouse_y >= context_y + 13 && selected >= 0 && selected < 5) {
                 context_open = 0;
                 if (selected == 1) open_window(APPEAR);
                 else if (selected == 2) open_window(WINDOWS_APP);
                 else if (selected == 3) toggle_desktop();
+                else if (selected == 4) toggle_dark_aero();
             }
         }
         context_open = 0;
@@ -2481,8 +2536,9 @@ static void handle_click(void) {
                 }
             } else if (i == APPEAR) {
                 int y = w->y + 34;
+                if (inside(mouse_x, mouse_y, w->x + w->w - 209, y + 8, 181, 35)) toggle_dark_aero();
                 for (int k = 0; k < 3; k++) {
-                    if (inside(mouse_x, mouse_y, w->x + 24, y + 67 + 66 * k, w->w - 48, 54)) theme = k;
+                    if (inside(mouse_x, mouse_y, w->x + 24, y + 67 + 66 * k, w->w - 48, 54)) select_theme(k);
                     if (inside(mouse_x, mouse_y, w->x + 26 + k * 140, y + 298, 129, 43)) wallpaper = k;
                     if (inside(mouse_x, mouse_y, w->x + 122 + k * 79, y + 353, 67, 29)) glass_level = k;
                     if (inside(mouse_x, mouse_y, w->x + 2 + 120 + k * 62, y + 397, 39, 31)) accent_index = k;
@@ -2656,6 +2712,7 @@ static void handle_key(uint8_t code) {
         start_open = 0; context_open = 0; quick_open = 0; notification_open = 0;
         menu_query_len = 0; menu_query[0] = 0; dirty = 1; return;
     }
+    if (control_down && alt_down && key == 0x32) { toggle_dark_aero(); return; }
     if (alt_down && key == 0x0f) { start_or_cycle_switcher(); return; }
     if (tab_active) return;
     if (control_down && alt_down && key == 0x20) {
@@ -2720,6 +2777,14 @@ static void handle_key(uint8_t code) {
         return;
     }
     if (alt_down && key == 0x20) { toggle_desktop(); return; }
+    if (control_down && alt_down && (key == 0x48 || key == 0x50)) {
+        int app = active_window();
+        if (app >= 0) {
+            if (key == 0x48) toggle_maximize(app);
+            else close_window(app, 1);
+        }
+        return;
+    }
     if (control_down && alt_down && (key == 0x4b || key == 0x4d)) {
         int a = active_window();
         if (a >= 0) snap_window(a, key == 0x4b ? -1 : 1);
@@ -2902,12 +2967,12 @@ void kmain(void) {
         }
     }
     notes_len = size(notes);
-    log_write("Cinmix kernel 0.14  [i386]");
+    log_write("Cinmix kernel 0.15  [i386]");
     log_write("RAM volume mounted at R:");
     init_mouse();
     init_frame_clock();
     refresh_clock();
-    notify("Cinmix 0.14 is ready");
+    notify("Cinmix 0.15 is ready");
     repaint();
     uint32_t cycles = 0;
     for (;;) {

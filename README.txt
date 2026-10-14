@@ -1,3 +1,5 @@
-Cinmix 0.14 | BIOS i386 | Full HD 1920x1080 preferred
+Cinmix 0.15 | BIOS i386 | 1920x1080 preferred
 
-Cinmix now targets 1920x1080x32 through Bochs/VBE modes with a fallback where the hardware does not support it. Full HD software framebuffers use 7680 bytes per row. Transitions use a 120Hz animation clock with shorter eased window and panel tweens. Unnecessary full-window glass work behind opaque content was reduced to help responsiveness at 1080p. Taskbar hover delay remains approximately one second. Existing apps, icons, cursor, windows, panel animations and taskbar highlights remain.
+New: Dark Aero theme for the desktop, applications and glass panels. Toggle it using Appearance, Quick Panel, desktop context menu, Ctrl+Alt+M, or the Run commands dark/light. Quiet mode stores notifications without showing unread badges; enable it in Quick Panel or with the quiet command. Ctrl+Alt+Up maximizes/restores a window, Ctrl+Alt+Down minimizes it. Existing window animations, icons, notification management and cursor are preserved.
+
+Build: make verify. Full emulator boot and performance are not verified by these native tests.
