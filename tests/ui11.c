@@ -37,7 +37,7 @@ int main(void) {
         windows[i].w=760;windows[i].h=485;
     }
     mouse_x=1050;mouse_y=610;
-    notify("Cinmix 0.11 is ready");
+    notify("Cinmix 0.13 is ready");
     frames(2);
     require(desktop_regenerations == 1);
     require(cached_wallpaper == 0);
@@ -105,9 +105,11 @@ int main(void) {
     task_hover=FILES;
     mouse_x=taskbar_left(7)+20;
     mouse_y=sh-27;
+    hover_delay = hover_delay_target();
+    hover_visible = 1;
     frames(2);
     snap("build/preview.ppm");
-    require(notification_count > 0);
+    require(notification_count == 0);
     shadow_pixels=0;
     repaint();
     require(shadow_pixels < 200000);
@@ -117,6 +119,6 @@ int main(void) {
     require(desktop_regenerations == before+1);
     repaint();
     require(desktop_regenerations == before+1);
-    puts("PASS: cached wallpaper invalidation, cursor-only blits, notification open/read/clear, quick panel software volume controls, accent palette, tweened open/close/minimize, taskbar live preview, perimeter shadows");
+    puts("PASS: cached wallpaper invalidation, cursor-only blits, notification open/read/clear, quick panel software volume controls, accent palette, tweened open/close/minimize, delayed taskbar live preview, perimeter shadows");
     return 0;
 }
