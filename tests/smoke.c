@@ -28,6 +28,7 @@ static void settle(int frames) {
 int main(void) {
     check(mmap((void *)0x400000, 1280 * 720 * 4, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) != MAP_FAILED);
     check(mmap((void *)0x900000, 1280 * 720 * 4, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) != MAP_FAILED);
+    check(mmap((void *)0xD00000, 1280 * 720 * 4, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) != MAP_FAILED);
     check(mmap((void *)0x2000000, 1280 * 720 * 4, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) != MAP_FAILED);
     sw = 1280;
     sh = 720;
@@ -84,8 +85,8 @@ int main(void) {
     handle_key(0x26);
     handle_key(0x12);
     handle_key(0x31);
-    check(menu_query_len == 4);
-    check(same(menu_query, "alen"));
+    check(menu_query_len == 5);
+    check(same(menu_query, "calen"));
     check(menu_row_app(0) == CALENDAR);
     settle(3);
     screen("build/search.ppm");

@@ -62,7 +62,7 @@ def create(bootpath, kernelpath, readmepath, destination):
     pvd = bytearray(BLOCK)
     pvd[0:7] = b'\x01CD001\x01'
     pvd[8:40] = b'CINMIX'.ljust(32, b' ')
-    pvd[40:72] = b'CINMIX_0_10'.ljust(32, b' ')
+    pvd[40:72] = b'CINMIX_0_11'.ljust(32, b' ')
     pvd[80:88] = dual32(sectors)
     pvd[120:124] = dual16(1)
     pvd[124:128] = dual16(1)
@@ -88,7 +88,7 @@ def create(bootpath, kernelpath, readmepath, destination):
 
     validation = bytearray(32)
     validation[0] = 1
-    validation[4:28] = b'CINMIX 0.10'.ljust(24, b' ')
+    validation[4:28] = b'CINMIX 0.11'.ljust(24, b' ')
     validation[30:32] = b'\x55\xaa'
     checksum = -sum(struct.unpack('<16H', validation)) & 0xffff
     struct.pack_into('<H', validation, 28, checksum)
