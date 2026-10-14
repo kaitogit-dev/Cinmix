@@ -1,8 +1,13 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "proc.h"
+#include "pe.h"
 #include "pinta.c"
 #ifndef __i386__
+volatile uint32_t cm_pe_last_exit;
+volatile uint32_t cm_pe_completed;
+volatile uint32_t cm_pe_launches;
+int cm_proc_launch_pe(const uint8_t *data, uint32_t count) { (void)data; (void)count; return CM_PE_UNSUPPORTED_RUNTIME; }
 int cm_paint_submit(int x, int y, uint32_t color, uint32_t radius) { (void)x; (void)y; (void)color; (void)radius; return 0; }
 #endif
 
@@ -13,6 +18,9 @@ extern uint16_t boot_height;
 extern uint8_t boot_bpp;
 extern const uint8_t cinmix_font[96][16][8];
 
+static uint8_t pe_file_cache[4097];
+static uint32_t pe_reported_exits;
+static int pe_last_launch_status;
 static int theme;
 static int previous_theme;
 static int do_not_disturb;
@@ -1211,7 +1219,7 @@ static void print_info(void) {
     log_write("calendar windows echo reboot halt");
     log_write("tasklist handles disk save");
     log_write("screen snapleft snapright");
-    log_write("context resize");
+    log_write("context resize runpe peinfo compat");
 }
 
 static void reboot_machine(void) {
@@ -1239,7 +1247,7 @@ static void execute_command(void) {
     log_write(linebuf);
     if (!console_len) return;
     if (same(console_input, "help")) print_info();
-    else if (same(console_input, "ver")) log_write("Cinmix 0.22  |  kernel 0.22  |  i386");
+    else if (same(console_input, "ver")) log_write("Cinmix 0.23  |  PE32 executable loader  |  i386");
     else if (same(console_input, "clear")) log_count = 0;
     else if (same(console_input, "context")) log_write("Right click on desktop");
     else if (same(console_input, "dark")) { select_theme(3); log_write("Dark Aero enabled"); }
@@ -1252,7 +1260,7 @@ static void execute_command(void) {
         log_write("/ram/readme.txt");
         log_write("/ram/boot.log");
         log_write("/ram/notes.txt");
-    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix 0.22; persistent D: requires CinmixFS disk");
+    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix 0.23; PE32/CUI; .NET/GTK not yet available");
     else if (same(console_input, "cat boot.log")) log_write("El Torito -> kernel -> protected mode -> UI");
     else if (same(console_input, "cat notes.txt")) {
         char one[72] = "";
@@ -1269,6 +1277,33 @@ static void execute_command(void) {
         append(line, " / NT: ", 72);
         number(n, (uint32_t)nt_open_handle_count()); append(line, n, 72);
         log_write(line);
+    }
+    else if (same(console_input, "compat")) {
+        log_write("PE32 x86/CUI: limited support via runpe <name>");
+        log_write("KERNEL32: GetPID GetTickCount ExitProcess");
+        log_write(".NET 10 / GTK4 / Win32 GUI: not supported yet");
+    }
+    else if (same(console_input, "peinfo")) {
+        char line[72] = "PE32 launches: ", n[12];
+        number(n, cm_pe_launches); append(line,n,72); log_write(line);
+        line[0]=0; append(line,"PE32 completed: ",72);
+        number(n,cm_pe_completed); append(line,n,72); log_write(line);
+        if (cm_pe_completed) {
+            line[0]=0; append(line,"Last exit code: ",72);
+            number(n,cm_pe_last_exit); append(line,n,72); log_write(line);
+        }
+        log_write(cm_pe_error(pe_last_launch_status));
+    }
+    else if (begins(console_input, "runpe ")) {
+        if (!storage_ready) log_write("Attach a writable CinmixFS disk first");
+        else {
+            int n=storage_load(console_input+6,(char *)pe_file_cache,sizeof(pe_file_cache));
+            if (n<0) log_write("Executable not found on D: or failed checksum");
+            else {
+                pe_last_launch_status=cm_proc_launch_pe(pe_file_cache,(uint32_t)n);
+                log_write(cm_pe_error(pe_last_launch_status));
+            }
+        }
     }
     else if (same(console_input, "tasklist")) {
         for (int i = 0; i < APPS; i++) if (cm_tasks[i].pid) {
@@ -1595,21 +1630,30 @@ static int files_list_left(int x, int cw) { return x + files_nav_width(cw) + 28;
 static int files_list_width(int cw) { return cw - files_nav_width(cw) - files_preview_width(cw) - 48; }
 static int files_row_top(int y) { return y + 134; }
 static int files_row_height(void) { return file_view ? 66 : 37; }
+static int pe_file_suffix(const char *name) {
+    int len=size(name);
+    if (len<5) return 0;
+    const char *extension=name+len-4;
+    return (extension[0]=='.' && (extension[1]=='e'||extension[1]=='E') &&
+            (extension[2]=='x'||extension[2]=='X') && (extension[3]=='e'||extension[3]=='E'));
+}
 static void files_restore(void) {
     file_created = 0;
     if (!storage_ready) return;
     char name[24];
-    for (int k = 0; k < STORAGE_SLOTS && file_created < 3; k++) {
-        if (!cm_file_list(k, name)) break;
-        if (same(name, "notes.txt") || same(name, "system.reg")) continue;
-        copy(file_extra_names[file_created++], name, 24);
+    for (int pass=0;pass<2;pass++) {
+        for (int k=0;k<STORAGE_SLOTS && file_created<3;k++) {
+            if (!cm_file_list(k,name)) break;
+            if (same(name,"notes.txt") || same(name,"system.reg") || pe_file_suffix(name)!=(!pass)) continue;
+            copy(file_extra_names[file_created++],name,24);
+        }
     }
 }
 
 static int files_count(void) { return FILE_COUNT + file_created; }
 static const char *files_name(int id) { return id < FILE_COUNT ? file_names[id] : file_extra_names[id - FILE_COUNT]; }
-static const char *files_type(int id) { return id < FILE_COUNT ? file_types[id] : "Text Document"; }
-static const char *files_size(int id) { return id < FILE_COUNT ? file_sizes[id] : "0 KB"; }
+static const char *files_type(int id) { return id < FILE_COUNT ? file_types[id] : pe_file_suffix(files_name(id)) ? "Windows executable" : "Text Document"; }
+static const char *files_size(int id) { return id < FILE_COUNT ? file_sizes[id] : pe_file_suffix(files_name(id)) ? "2 KB" : "0 KB"; }
 static const char *files_date(int id) { return id < FILE_COUNT ? file_dates[id] : "2026-10-14 21:00"; }
 static int files_filter(int id) {
     if (file_location == 1 && id > 2) return 0;
@@ -1657,7 +1701,16 @@ static int files_row_hit(const Window *w, int px, int py) {
     return files_item((py - row_y) / row_h);
 }
 static void files_open_selected(void) {
-    if (selected_file == 2 || selected_file >= FILE_COUNT) {
+    if (selected_file >= FILE_COUNT && pe_file_suffix(files_name(selected_file))) {
+        int n=storage_ready ? storage_load(files_name(selected_file),(char *)pe_file_cache,sizeof(pe_file_cache)) : -1;
+        if (n<0) log_write("PE32 executable failed to load from D:");
+        else {
+            pe_last_launch_status=cm_proc_launch_pe(pe_file_cache,(uint32_t)n);
+            log_write(cm_pe_error(pe_last_launch_status));
+            if (pe_last_launch_status!=CM_PE_OK) notify("Windows app requires unsupported API/runtime");
+        }
+    }
+    else if (selected_file == 2 || selected_file >= FILE_COUNT) {
         if (notes_select(files_name(selected_file))) open_window(NOTES);
         else notify("Save current document before switching");
     }
@@ -1921,7 +1974,7 @@ static void window_content(int app, const Window *w) {
         text(x + 24, y + 62, "RELEASE 0.22", STEEL);
         rect(x + 21, y + 91, cw - 42, 1, HAIR);
         text(x + 24, y + 106, "Kernel", STEEL);
-        text(x + 166, y + 106, "Cinmix 0.22", INK);
+        text(x + 166, y + 106, "Cinmix 0.23", INK);
         text(x + 24, y + 134, "Target", STEEL);
         text(x + 166, y + 134, "i386 protected", INK);
         text(x + 24, y + 162, "Firmware", STEEL);
@@ -1982,7 +2035,7 @@ static void window_content(int app, const Window *w) {
             text(x + 55, yy + 9, pages[k], settings_page == k ? INK : INK2);
         }
         rect(x + 22, y + ch - 75, nw - 20, 1, HAIR);
-        text(x + 27, y + ch - 57, "Cinmix 0.22", STEEL);
+        text(x + 27, y + ch - 57, "Cinmix 0.23", STEEL);
         text(x + 27, y + ch - 37, "1920 x 1080", STEEL);
         big_text(mx, y + 18, pages[settings_page], INK);
         if (settings_page == 1) {
@@ -2076,7 +2129,7 @@ static void window_content(int app, const Window *w) {
         } else {
             text(mx + 2, y + 61, "About Cinmix", STEEL);
             rounded(mx, y + 93, mw, 222, 12, UI_CARD);
-            big_text(mx + 20, y + 116, "Cinmix 0.22", INK);
+            big_text(mx + 20, y + 116, "Cinmix 0.23", INK);
             text(mx + 23, y + 162, "32-bit i386 operating system", STEEL);
             text(mx + 23, y + 193, "Legacy BIOS / El Torito boot", STEEL);
             text(mx + 23, y + 224, "Aero desktop with Dark Aero", STEEL);
@@ -3668,11 +3721,11 @@ void kmain(void) {
         files_restore();
         log_write("CinmixFS disk mounted at D: (ATA IDE)");
     } else log_write("RAM only: attach Cinmix disk to enable persistence");
-    log_write("Cinmix kernel 0.22 / protected user tasks");
+    log_write("Cinmix kernel 0.23 / PE32 loader");
     init_mouse();
     init_frame_clock();
     refresh_clock();
-    notify("Cinmix 0.22 is ready");
+    notify("Cinmix 0.23 is ready");
     repaint();
 #ifdef __i386__
     int cm_userspace_ready = cm_proc_initialize();
@@ -3686,6 +3739,13 @@ void kmain(void) {
         if (cm_userspace_ready && ((cycles & 65535u) == 0 || cm_paint_pending())) {
             cm_proc_run();
             if (cm_paint_collect(&sketch_pixels[0][0], SKETCH_W * SKETCH_H)) dirty = 1;
+            if (pe_reported_exits != cm_pe_completed) {
+                pe_reported_exits=cm_pe_completed;
+                char line[72]="PE32 process exited: ", number_buffer[12];
+                number(number_buffer,cm_pe_last_exit);
+                append(line,number_buffer,72);
+                log_write(line);
+            }
             init_frame_clock();
         }
 #endif

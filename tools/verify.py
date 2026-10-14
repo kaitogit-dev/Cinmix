@@ -59,17 +59,20 @@ def check(iso_path, boot_path, kernel_path, elf_path):
     assert b'\x8b\x0d' + struct.pack('<I', symbols['__bss_end']) not in segment
     assert sector(boot_lba)[512:] == bytes(SECTOR - 512)
     assert iso[(boot_lba + 1) * SECTOR:(boot_lba + 1) * SECTOR + len(kernel)] == kernel
-    assert iso[(boot_lba + 1) * SECTOR + len(kernel):(boot_lba + 65) * SECTOR] == bytes(64 * SECTOR - len(kernel))
+    assert iso[(boot_lba + 1) * SECTOR + len(kernel):(boot_lba + 81) * SECTOR] == bytes(80 * SECTOR - len(kernel))
     assert b'\x21\x00\x00\x00\x00\x00\x00\x00' in boot
-    assert b'\x40\x00' in boot
+    assert b'\x50\x00' in boot
     assert b'\xc7\x06\x16\x72\x80\x07' in kernel
     assert b'\xc7\x06\x18\x72\x38\x04' in kernel
     assert b'\xc7\x06\x14\x72\x00\x1e' in kernel
     assert b'\xb8\x80\x07' in kernel[:512]
     assert b'\xb8\x38\x04' in kernel[:512]
-    assert b'CINMIX_0_22' in sector(16)
-    assert b'CINMIX 0.22' in entry
-    for symbol in ('cm_enter_userspace', 'cm_irq0_stub', 'cm_syscall_stub',
+    assert b'CINMIX_0_23' in sector(16)
+    assert b'CINMIX 0.23' in entry
+    assert b'KERNEL32.DLL' in kernel
+    assert b'runpe ' in kernel
+    for symbol in ('cm_pe_load', 'cm_proc_launch_pe', 'cm_pe_error',
+                   'cm_enter_userspace', 'cm_irq0_stub', 'cm_syscall_stub',
                    'cm_gp_stub', 'cm_pf_stub', 'cm_proc_initialize',
                    'cm_proc_interrupt', 'cm_user_binary_start', 'cm_user_binary_end'):
         assert symbol in symbols, f'Missing protected-mode process symbol: {symbol}'

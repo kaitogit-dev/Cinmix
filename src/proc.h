@@ -23,6 +23,7 @@
 #define CM_SYSCALL_GETPID 1u
 #define CM_SYSCALL_YIELD 2u
 #define CM_SYSCALL_GETTICKS 3u
+#define CM_SYSCALL_EXIT 4u
 #define CM_THREAD_READY 1u
 #define CM_THREAD_STOPPED 2u
 #define CM_THREAD_FAULTED 3u
@@ -79,5 +80,9 @@ int cm_proc_fault_demo(void);
 int cm_paint_submit(int x, int y, uint32_t color, uint32_t radius);
 int cm_paint_collect(uint8_t *pixels, uint32_t count);
 int cm_paint_pending(void);
+int cm_proc_launch_pe(const uint8_t *data, uint32_t count);
+extern volatile uint32_t cm_pe_last_exit;
+extern volatile uint32_t cm_pe_completed;
+extern volatile uint32_t cm_pe_launches;
 
 #endif

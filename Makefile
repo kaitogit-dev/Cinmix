@@ -5,7 +5,7 @@ OBJCOPY = objcopy
 CFLAGS = -m32 -std=c11 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -fno-builtin -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -O2 -Wall -Wextra -Werror
 LDFLAGS = -m elf_i386 -T src/link.ld -nostdlib --build-id=none
 
-all: Cinmix-0.22.iso Cinmix-0.22-disk.img
+all: Cinmix-0.23.iso Cinmix-0.23-disk.img
 
 build:
 	mkdir -p build
@@ -22,42 +22,46 @@ build/entry.o: src/entry.S | build
 build/font.o: src/font.c | build
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-build/kernel.o: src/kernel.c src/objects.c src/ntos.c src/storage.c src/pinta.c src/proc.h | build
+build/kernel.o: src/kernel.c src/objects.c src/ntos.c src/storage.c src/pinta.c src/proc.h src/pe.h | build
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-build/proc.o: src/proc.c src/proc.h | build
+build/proc.o: src/proc.c src/proc.h src/pe.h | build
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+build/pe.o: src/pe.c src/pe.h | build
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 build/proc-asm.o: src/proc.S | build
 	$(AS) --32 -o $@ $<
 
-build/kernel.elf: build/entry.o build/kernel.o build/font.o build/proc.o build/proc-asm.o src/link.ld
-	$(LD) $(LDFLAGS) -o $@ build/entry.o build/kernel.o build/font.o build/proc.o build/proc-asm.o
+build/kernel.elf: build/entry.o build/kernel.o build/font.o build/proc.o build/proc-asm.o build/pe.o src/link.ld
+	$(LD) $(LDFLAGS) -o $@ build/entry.o build/kernel.o build/font.o build/proc.o build/proc-asm.o build/pe.o
 
 build/kernel.bin: build/kernel.elf
 	$(OBJCOPY) -O binary $< $@
-	@test $$(stat -c%s $@) -le 131072 || (echo 'Kernel exceeds CD loader capacity' && exit 1)
+	@test $$(stat -c%s $@) -le 163840 || (echo 'Kernel exceeds CD loader capacity' && exit 1)
 
-Cinmix-0.22.iso: build/cdboot.bin build/kernel.bin README.txt tools/iso.py
+Cinmix-0.23.iso: build/cdboot.bin build/kernel.bin README.txt tools/iso.py
 	python3 tools/iso.py build/cdboot.bin build/kernel.bin README.txt $@
 
-Cinmix-0.22-disk.img: tools/disk.py
+Cinmix-0.23-disk.img: tools/disk.py tools/install_pe.py build/hello.exe
 	python3 tools/disk.py $@
+	python3 tools/install_pe.py $@ build/hello.exe
 
-verify: Cinmix-0.22.iso
+verify: Cinmix-0.23.iso
 	python3 tools/verify.py $< build/cdboot.bin build/kernel.bin build/kernel.elf
 	$(MAKE) smoke
 
-NATIVE_TESTS = build/smoke build/ui11 build/compositor build/controls build/ui12 build/ui13 build/ui131 build/animations build/ui133 build/fullhd build/ui15 build/ui16 build/ui17 build/storage build/ui18 build/objects build/ui19 build/ntos build/ui20 build/proc-test build/pinta-user-test build/ui22
+NATIVE_TESTS = build/smoke build/ui11 build/compositor build/controls build/ui12 build/ui13 build/ui131 build/animations build/ui133 build/fullhd build/ui15 build/ui16 build/ui17 build/storage build/ui18 build/objects build/ui19 build/ntos build/ui20 build/proc-test build/pinta-user-test build/pe-test build/pe-disk-test build/ui22
 
-build/%: tests/%.c src/kernel.c src/storage.c src/objects.c src/ntos.c src/pinta.c src/font.c | build
-	$(CC) -std=gnu11 -O1 -o $@ $< src/font.c
+build/%: tests/%.c src/kernel.c src/storage.c src/objects.c src/ntos.c src/pinta.c src/font.c src/pe.c | build
+	$(CC) -std=gnu11 -O1 -o $@ $< src/font.c src/pe.c
 
-build/proc-test: tests/proc.c src/proc.c src/proc.h | build
-	$(CC) -std=gnu11 -O1 -no-pie -o $@ $<
+build/proc-test: tests/proc.c src/proc.c src/proc.h src/pe.c src/pe.h | build
+	$(CC) -std=gnu11 -O1 -no-pie -o $@ $< src/pe.c
 
-build/pinta-user-test: tests/pinta_user.c src/proc.c src/proc.h src/pinta.c | build
-	$(CC) -std=gnu11 -O1 -no-pie -o $@ $<
+build/pinta-user-test: tests/pinta_user.c src/proc.c src/proc.h src/pinta.c src/pe.c | build
+	$(CC) -std=gnu11 -O1 -no-pie -o $@ $< src/pe.c
 
 smoke: $(NATIVE_TESTS) | build
 	./build/smoke
@@ -98,16 +102,30 @@ smoke: $(NATIVE_TESTS) | build
 	./build/ui20 build/ui20-test.img
 	./build/proc-test
 	./build/pinta-user-test
+	./build/pe-test
+	rm -f build/pe-disk-test.img
+	python3 tools/disk.py build/pe-disk-test.img
+	python3 tools/install_pe.py build/pe-disk-test.img build/hello.exe
+	./build/pe-disk-test build/pe-disk-test.img
 	rm -f build/pinta-22.img
 	python3 tools/disk.py build/pinta-22.img
 	./build/ui22 build/pinta-22.img save
 	./build/ui22 build/pinta-22.img reload
+
+build/pe-test: tests/pe.c src/pe.c src/pe.h src/proc.c src/proc.h build/hello.exe | build
+	$(CC) -std=gnu11 -O1 -no-pie -o $@ tests/pe.c src/pe.c
+
+build/pe-disk-test: tests/pe_disk.c src/storage.c src/pe.c src/pe.h | build
+	$(CC) -std=gnu11 -O1 -o $@ tests/pe_disk.c src/pe.c
+
+build/hello.exe: tools/pe_sample.py | build
+	python3 tools/pe_sample.py $@
 
 bench: | build
 	$(CC) -std=gnu11 -O2 -o build/bench tests/bench.c src/font.c
 	./build/bench
 
 clean:
-	rm -rf build Cinmix-0.22.iso
+	rm -rf build Cinmix-0.23.iso
 
 .PHONY: all verify smoke bench clean

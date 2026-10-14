@@ -1,4 +1,5 @@
 #include "proc.h"
+#include "pe.h"
 #include <stddef.h>
 
 #define CM_PAGE_DIRECTORY_ITEMS 1024u
@@ -44,6 +45,10 @@ volatile uint32_t cm_user_syscalls;
 volatile uint32_t cm_user_ticks;
 volatile uint32_t cm_protection_faults;
 volatile uint32_t cm_user_slices;
+volatile uint32_t cm_pe_last_exit;
+volatile uint32_t cm_pe_completed;
+volatile uint32_t cm_pe_launches;
+static uint32_t cm_pe_pid = 200u;
 
 static void cm_zero_memory(void *dst, uint32_t length) {
     uint8_t *out = (uint8_t *)dst;
@@ -160,6 +165,13 @@ static uint32_t cm_interrupt_policy(CmInterruptFrame *frame, int reason) {
         uint32_t code = frame->eax;
         if (code == CM_SYSCALL_GETPID) frame->eax = task->pid;
         else if (code == CM_SYSCALL_GETTICKS) frame->eax = cm_user_ticks;
+        else if (code == CM_SYSCALL_EXIT) {
+            task->last_error = frame->ebx;
+            task->state = CM_THREAD_STOPPED;
+            cm_pe_last_exit = frame->ebx;
+            cm_pe_completed++;
+            return cm_select_next();
+        }
         else if (code == CM_SYSCALL_YIELD) {
             frame->eax = 0;
             return cm_select_next();
@@ -177,6 +189,76 @@ uint32_t cm_proc_interrupt(CmInterruptFrame *frame, int reason) {
     }
 #endif
     return cm_interrupt_policy(frame, reason);
+}
+
+static int cm_win32_equal(const char *a, const char *b) {
+    while (*a && *b) {
+        char x=*a++, y=*b++;
+        if (x>='A' && x<='Z') x+=32;
+        if (y>='A' && y<='Z') y+=32;
+        if (x!=y) return 0;
+    }
+    return !*a && !*b;
+}
+
+static uint32_t cm_win32_resolve(const char *dll, const char *name) {
+    if (!cm_win32_equal(dll, "KERNEL32.DLL")) return 0;
+    if (cm_win32_equal(name, "GetCurrentProcessId")) return CM_USER_BASE + CM_PE_THUNK_OFFSET + CM_PE_THUNK_PID;
+    if (cm_win32_equal(name, "GetTickCount")) return CM_USER_BASE + CM_PE_THUNK_OFFSET + CM_PE_THUNK_TICKS;
+    if (cm_win32_equal(name, "ExitProcess")) return CM_USER_BASE + CM_PE_THUNK_OFFSET + CM_PE_THUNK_EXIT;
+    return 0;
+}
+
+static void cm_make_thunk(uint8_t *dst, uint32_t syscall) {
+    dst[0]=0xb8;
+    dst[1]=(uint8_t)syscall;
+    dst[2]=(uint8_t)(syscall>>8);
+    dst[3]=(uint8_t)(syscall>>16);
+    dst[4]=(uint8_t)(syscall>>24);
+    dst[5]=0xcd;
+    dst[6]=0x80;
+    dst[7]=0xc3;
+}
+
+int cm_proc_launch_pe(const uint8_t *data, uint32_t count) {
+    if (!cm_proc_ready || !data || !count) return CM_PE_BAD_IMAGE;
+    CmUserTask *task = &cm_user_tasks[1];
+    uint8_t *physical = (uint8_t *)(uintptr_t)task->physical_base;
+    CmPeImage image;
+    task->state=CM_THREAD_STOPPED;
+    int status = cm_pe_load(data,count,physical,CM_PE_LIMIT,&image,cm_win32_resolve);
+    if (status!=CM_PE_OK) return status;
+    uint8_t *thunks=physical+CM_PE_THUNK_OFFSET;
+    cm_zero_memory(thunks,48);
+    cm_make_thunk(thunks+CM_PE_THUNK_PID,CM_SYSCALL_GETPID);
+    cm_make_thunk(thunks+CM_PE_THUNK_TICKS,CM_SYSCALL_GETTICKS);
+    cm_make_thunk(thunks+CM_PE_THUNK_EXIT,CM_SYSCALL_EXIT);
+    thunks[CM_PE_THUNK_EXIT+0]=0x8b;
+    thunks[CM_PE_THUNK_EXIT+1]=0x5c;
+    thunks[CM_PE_THUNK_EXIT+2]=0x24;
+    thunks[CM_PE_THUNK_EXIT+3]=0x04;
+    cm_make_thunk(thunks+CM_PE_THUNK_EXIT+4,CM_SYSCALL_EXIT);
+    cm_zero_memory(physical+0x003ff000u,0x1000);
+    CmInterruptFrame *frame = (CmInterruptFrame *)(uintptr_t)(task->kernel_stack_top-sizeof(CmInterruptFrame));
+    cm_zero_memory(frame,sizeof(*frame));
+    frame->gs=CM_USER_DATA_SELECTOR;
+    frame->fs=CM_USER_DATA_SELECTOR;
+    frame->es=CM_USER_DATA_SELECTOR;
+    frame->ds=CM_USER_DATA_SELECTOR;
+    frame->eip=image.entry;
+    frame->cs=CM_USER_CODE_SELECTOR;
+    frame->eflags=0x202u;
+    frame->user_esp=CM_USER_TOP;
+    frame->user_ss=CM_USER_DATA_SELECTOR;
+    task->pid=++cm_pe_pid;
+    task->frame=(uint32_t)(uintptr_t)frame;
+    task->state=CM_THREAD_READY;
+    task->faults=0;
+    task->last_error=0;
+    task->last_fault=0;
+    cm_pe_last_exit=0xffffffffu;
+    cm_pe_launches++;
+    return CM_PE_OK;
 }
 
 uint32_t cm_proc_active_tasks(void) {
