@@ -135,8 +135,10 @@ static int drag_dy;
 static int start_open;
 static int next_order;
 static int task_hover = -1;
+static int desktop_hover = -1;
 static int desktop_focus = -1;
 static int last_desktop_focus = -1;
+static int last_desktop_hover = -1;
 static int tab_active;
 static int tab_apps[APPS];
 static int tab_count;
@@ -164,6 +166,11 @@ static int right_down;
 static int resize_app = -1;
 static int snap_side[APPS];
 static int selected_file;
+#define FILE_COUNT 5
+static const char *file_names[FILE_COUNT] = {"readme.txt", "boot.log", "notes.txt", "wallpaper.bmp", "calendar.dat"};
+static const char *file_types[FILE_COUNT] = {"Text Document", "Log File", "Text Document", "Bitmap Image", "Data File"};
+static const char *file_sizes[FILE_COUNT] = {"2 KB", "3 KB", "1 KB", "128 KB", "4 KB"};
+static const char *file_dates[FILE_COUNT] = {"2026-10-14 20:42", "2026-10-14 20:41", "2026-10-14 20:40", "2026-10-14 20:15", "2026-10-14 19:58"};
 static int sketch_color = 1;
 static int sketch_brush = 1;
 static uint8_t sketch_pixels[SKETCH_H][SKETCH_W];
@@ -754,6 +761,7 @@ static void line(int x1, int y1, int x2, int y2, uint32_t color) {
 }
 
 static int active_window(void);
+static int inside(int px, int py, int x, int y, int w, int h);
 
 static void draw_mark(int x, int y, uint32_t color) {
     rect(x, y, 9, 4, color);
@@ -820,6 +828,29 @@ static void desktop_position(int slot, int *x, int *y) {
     if (sw >= 1700) { *x = 24 + (slot / 4) * 116; *y = 25 + (slot % 4) * 96; }
     else if (sw >= 600) { *x = 18 + (slot / 4) * 96; *y = 17 + (slot % 4) * 76; }
     else { *x = 7 + (slot % 4) * 77; *y = 9 + (slot / 4) * 62; }
+}
+
+static void desktop_slot_bounds(int slot, int *x, int *y, int *w, int *h) {
+    desktop_position(slot, x, y);
+    if (sw >= 1700) { *w = 94; *h = 85; }
+    else if (sw >= 600) { *w = 87; *h = 77; }
+    else { *w = 73; *h = 54; }
+}
+
+static int desktop_slot_hit(int px, int py) {
+    if (py >= sh - 52 || start_open || quick_open || notification_open || context_open || run_open || tab_active) return -1;
+    for (int i = 0; i < APPS; i++) {
+        if (!windows[i].opened || windows[i].minimized) continue;
+        int wx, wy, ww, wh;
+        animated_window_rect(i, &wx, &wy, &ww, &wh);
+        if (inside(px, py, wx, wy, ww, wh) || inside(px, py, windows[i].x, windows[i].y, windows[i].w, windows[i].h)) return -1;
+    }
+    for (int k = 0; k < 8; k++) {
+        int x, y, w, h;
+        desktop_slot_bounds(k, &x, &y, &w, &h);
+        if (y + h < sh - 52 && inside(px, py, x, y, w, h)) return k;
+    }
+    return -1;
 }
 
 static const int pinned_apps[7] = {FILES, NOTES, CONSOLE, SKETCH, CALENDAR, CALC, APPEAR};
@@ -991,15 +1022,26 @@ static void draw_wallpaper(void) {
 static void draw_desktop(void) {
     draw_wallpaper();
     for (int k = 0; k < 8; k++) {
-        int x,y;
-        desktop_position(k, &x, &y);
-        if (y + 67 >= sh - 52) continue;
+        int x, y, w, h;
+        desktop_slot_bounds(k, &x, &y, &w, &h);
+        if (y + h >= sh - 52) continue;
         int id = desk_shortcuts[k];
-        draw_icon(x + 20, y + 2, id);
+        int hover = desktop_hover == k;
+        int focus = desktop_focus == k;
+        if (hover || focus) {
+            round_capture(x + 2, y + 1, w - 6, h - 8, 12);
+            glass(x + 2, y + 1, w - 6, h - 8, hover ? (NIGHT ? 0x3c6485 : 0xaeddfa) : (NIGHT ? 0x537a9c : 0xd2edff), hover ? 86 : 104);
+            if (hover) glass(x + 5, y + 4, w - 12, 16, 0xffffff, 28);
+            round_finish(x + 2, y + 1, w - 6, h - 8, 12);
+        }
+        draw_icon(x + 20, y + 4, id);
         int tw = size(app_name[id]) * 8;
-        text(x + 40 - tw / 2 + 1, y + 52, app_name[id], 0x162746);
-        text(x + 40 - tw / 2, y + 51, app_name[id], WHITE);
-        if (desktop_focus == k) rounded(x + 21, y + 67, 38, 3, 1, 0xbdefff);
+        if (hover || focus) {
+            rounded(x + (w - tw - 14) / 2, y + h - 25, tw + 14, 19, 8, hover ? (NIGHT ? 0x2b4763 : 0xcde8fb) : (NIGHT ? 0x375977 : 0xe1f2ff));
+        }
+        text(x + 40 - tw / 2 + 1, y + 54, app_name[id], 0x162746);
+        text(x + 40 - tw / 2, y + 53, app_name[id], WHITE);
+        if (focus) rounded(x + 21, y + h - 9, 38, 3, 1, 0xbdefff);
     }
     if (sw >= 600 && sh >= 480) {
         text(sw - 148, sh - 105, "cinmix", 0xd5eeff);
@@ -1100,7 +1142,7 @@ static void execute_command(void) {
     log_write(linebuf);
     if (!console_len) return;
     if (same(console_input, "help")) print_info();
-    else if (same(console_input, "ver")) log_write("Cinmix 0.15  |  kernel 0.15  |  i386");
+    else if (same(console_input, "ver")) log_write("Cinmix 0.16  |  kernel 0.16  |  i386");
     else if (same(console_input, "clear")) log_count = 0;
     else if (same(console_input, "context")) log_write("Right click on desktop");
     else if (same(console_input, "dark")) { select_theme(3); log_write("Dark Aero enabled"); }
@@ -1113,7 +1155,7 @@ static void execute_command(void) {
         log_write("/ram/readme.txt");
         log_write("/ram/boot.log");
         log_write("/ram/notes.txt");
-    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix kernel 0.15; El Torito; RAM volume");
+    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix kernel 0.16; Explorer shell; RAM volume");
     else if (same(console_input, "cat boot.log")) log_write("El Torito -> kernel -> protected mode -> UI");
     else if (same(console_input, "cat notes.txt")) {
         char one[72] = "";
@@ -1332,6 +1374,26 @@ static void undo_sketch(void) {
     dirty = 1;
 }
 
+static int files_nav_width(int cw) { return cw >= 900 ? 188 : 156; }
+static int files_preview_width(int cw) { return cw >= 920 ? 222 : (cw >= 760 ? 178 : 0); }
+static int files_list_left(int x, int cw) { return x + files_nav_width(cw) + 28; }
+static int files_list_width(int cw) { return cw - files_nav_width(cw) - files_preview_width(cw) - 48; }
+static int files_row_top(int y) { return y + 134; }
+static int files_row_height(void) { return 37; }
+static int files_row_hit(const Window *w, int px, int py) {
+    int x = w->x + 2;
+    int y = w->y + 34;
+    int cw = w->w - 4;
+    int row_x = files_list_left(x, cw);
+    int row_w = files_list_width(cw);
+    int row_y = files_row_top(y);
+    int row_h = files_row_height();
+    for (int i = 0; i < FILE_COUNT; i++) {
+        if (inside(px, py, row_x, row_y + i * row_h, row_w, row_h - 1)) return i;
+    }
+    return -1;
+}
+
 static int menu_row_app(int row) {
     int visible = 0;
     for (int i = 0; i < APPS; i++) {
@@ -1376,35 +1438,101 @@ static void window_content(int app, const Window *w) {
     }
     rect(x, y, cw, ch, PAPER);
     if (app == FILES) {
-        rect(x, y, 122, ch, LIGHT);
-        rect(x + 122, y, 1, ch, HAIR);
-        text(x + 12, y + 17, "COMPUTER", INK);
-        rect(x + 12, y + 43, 96, 1, HAIR);
-        text(x + 16, y + 55, "RAM (R:)", BLUE);
-        text(x + 16, y + 82, "3 files", STEEL);
-        text(x + 144, y + 14, "R: /", STEEL);
-        rect(x + 138, y + 38, cw - 148, 1, HAIR);
-        for (int i = 0; i < 3; i++) {
-            int yy = y + 52 + i * 37;
-            if (selected_file == i) rounded(x + 135, yy - 4, cw - 147, 32, 8, NIGHT ? 0x36506d : 0xd1dce1);
-            rounded(x + 148, yy + 1, 15, 18, 4, WHITE);
-            outline(x + 148, yy + 1, 15, 18, STEEL);
-            rect(x + 151, yy + 6, 9, 1, HAIR);
-            rect(x + 151, yy + 10, 8, 1, HAIR);
-            text(x + 174, yy + 2, i == 0 ? "readme.txt" : i == 1 ? "boot.log" : "notes.txt", INK);
+        int nav_w = files_nav_width(cw);
+        int preview_w = files_preview_width(cw);
+        int list_x = files_list_left(x, cw);
+        int list_w = files_list_width(cw);
+        int list_y = files_row_top(y);
+        int row_h = files_row_height();
+        int preview_x = x + cw - preview_w - 14;
+        rounded(x + 14, y + 10, cw - 28, 34, 10, UI_FIELD);
+        outline(x + 14, y + 10, cw - 28, 34, UI_EDGE);
+        const char *actions[4] = {"New", "Sort", "View", "..."};
+        for (int i = 0; i < 4; i++) {
+            int bw = i == 3 ? 38 : 60;
+            int bx = x + 24 + (i < 3 ? i * 68 : 3 * 68 - 10);
+            rounded(bx, y + 15, bw, 24, 8, i == 0 ? (NIGHT ? 0x355574 : 0xcfe9fb) : (NIGHT ? 0x22384e : 0xffffff));
+            outline(bx, y + 15, bw, 24, i == 0 ? UI_EDGE : HAIR);
+            text(bx + (i == 3 ? 14 : 16), y + 21, actions[i], i == 0 ? BLUE : INK);
         }
-        int yy = y + 176;
-        rect(x + 137, yy, cw - 150, 1, HAIR);
-        text(x + 146, yy + 11, "PREVIEW", STEEL);
-        if (selected_file == 0) {
-            text(x + 146, yy + 36, "Cinmix 0.15", INK);
-            text(x + 146, yy + 57, "i386 / El Torito CD", STEEL);
-        } else if (selected_file == 1) {
-            text(x + 146, yy + 36, "Protected mode", INK);
-            text(x + 146, yy + 57, "Framebuffer active", STEEL);
-        } else {
-            text(x + 146, yy + 36, notes, INK);
-            text(x + 146, yy + 57, "Volatile storage", STEEL);
+        rounded(x + 14, y + 52, cw - 28 - 170, 30, 10, WHITE);
+        outline(x + 14, y + 52, cw - 28 - 170, 30, HAIR);
+        text(x + 29, y + 59, "This PC  >  RAM (R:)", INK);
+        rounded(x + cw - 168, y + 52, 154, 30, 10, UI_FIELD);
+        outline(x + cw - 168, y + 52, 154, 30, UI_EDGE);
+        text(x + cw - 148, y + 59, "Search RAM (R:)", STEEL);
+
+        rounded(x + 12, y + 92, nav_w, ch - 104, 13, LIGHT);
+        outline(x + 12, y + 92, nav_w, ch - 104, HAIR);
+        text(x + 26, y + 106, "Home", INK2);
+        const char *nav_items[6] = {"Quick access", "Desktop", "Documents", "Downloads", "Pictures", "RAM (R:)"};
+        for (int i = 0; i < 6; i++) {
+            int py = y + 130 + i * 34;
+            int active = i == 5;
+            if (active) rounded(x + 20, py - 4, nav_w - 16, 28, 9, NIGHT ? 0x35516f : 0xdceefa);
+            rounded(x + 26, py + 3, 14, 14, 4, i == 5 ? 0xe8bd79 : (NIGHT ? 0x42617f : 0x8bb6d6));
+            text(x + 48, py, nav_items[i], active ? INK : INK2);
+        }
+
+        if (preview_w) {
+            rounded(preview_x, y + 92, preview_w, ch - 104, 13, LIGHT);
+            outline(preview_x, y + 92, preview_w, ch - 104, HAIR);
+        }
+        text(list_x, y + 102, "Name", STEEL);
+        text(list_x + (list_w * 46) / 100, y + 102, "Date modified", STEEL);
+        text(list_x + (list_w * 74) / 100, y + 102, "Type", STEEL);
+        text(list_x + list_w - 44, y + 102, "Size", STEEL);
+        rect(list_x, y + 120, list_w, 1, HAIR);
+        for (int i = 0; i < FILE_COUNT; i++) {
+            int ry = list_y + i * row_h;
+            if (selected_file == i) rounded(list_x, ry, list_w, row_h - 2, 10, NIGHT ? 0x35506b : 0xd8edf9);
+            else if (i & 1) rounded(list_x, ry, list_w, row_h - 2, 10, NIGHT ? 0x1d2c3c : 0xf7fbff);
+            rounded(list_x + 10, ry + 8, 16, 18, 4, WHITE);
+            outline(list_x + 10, ry + 8, 16, 18, STEEL);
+            rect(list_x + 13, ry + 13, 10, 1, HAIR);
+            rect(list_x + 13, ry + 17, 8, 1, HAIR);
+            text(list_x + 34, ry + 10, file_names[i], INK);
+            text(list_x + (list_w * 46) / 100, ry + 10, file_dates[i], INK2);
+            text(list_x + (list_w * 74) / 100, ry + 10, file_types[i], INK2);
+            text(list_x + list_w - 44, ry + 10, file_sizes[i], INK2);
+        }
+        rect(list_x, y + ch - 42, list_w, 1, HAIR);
+        text(list_x, y + ch - 31, "5 items", STEEL);
+        text(list_x + 80, y + ch - 31, "Details", STEEL);
+        if (preview_w) {
+            text(preview_x + 18, y + 106, "Details", STEEL);
+            rounded(preview_x + 22, y + 132, preview_w - 44, 116, 16, UI_FIELD);
+            outline(preview_x + 22, y + 132, preview_w - 44, 116, UI_EDGE);
+            rounded(preview_x + 38, y + 152, 38, 46, 8, WHITE);
+            outline(preview_x + 38, y + 152, 38, 46, STEEL);
+            rect(preview_x + 45, y + 164, 20, 2, HAIR);
+            rect(preview_x + 45, y + 174, 18, 2, HAIR);
+            rect(preview_x + 45, y + 184, 14, 2, HAIR);
+            text(preview_x + 88, y + 154, file_names[selected_file], INK);
+            text(preview_x + 88, y + 176, file_types[selected_file], STEEL);
+            text(preview_x + 18, y + 269, "Location", STEEL);
+            text(preview_x + 18, y + 291, "RAM (R:) /", INK);
+            text(preview_x + 18, y + 322, "Modified", STEEL);
+            text(preview_x + 18, y + 344, file_dates[selected_file], INK);
+            text(preview_x + 18, y + 375, "Size", STEEL);
+            text(preview_x + 18, y + 397, file_sizes[selected_file], INK);
+            rect(preview_x + 18, y + 427, preview_w - 36, 1, HAIR);
+            if (selected_file == 0) {
+                text(preview_x + 18, y + 443, "Cinmix 0.16", INK);
+                text(preview_x + 18, y + 464, "Dark Aero + Explorer", STEEL);
+            } else if (selected_file == 1) {
+                text(preview_x + 18, y + 443, "Boot successful", INK);
+                text(preview_x + 18, y + 464, "Framebuffer 1920x1080", STEEL);
+            } else if (selected_file == 2) {
+                text(preview_x + 18, y + 443, notes_len ? notes : "No notes yet", INK);
+                text(preview_x + 18, y + 464, "Volatile document", STEEL);
+            } else if (selected_file == 3) {
+                text(preview_x + 18, y + 443, "Aurora wallpaper asset", INK);
+                text(preview_x + 18, y + 464, "Bitmap preview available", STEEL);
+            } else {
+                text(preview_x + 18, y + 443, "Calendar cache", INK);
+                text(preview_x + 18, y + 464, "Structured app data", STEEL);
+            }
         }
     } else if (app == NOTES) {
         rect(x, y, cw, 27, LIGHT);
@@ -1454,10 +1582,10 @@ static void window_content(int app, const Window *w) {
     } else if (app == SYSTEM) {
         rect(x, y, cw, 4, BLUE);
         big_text(x + 21, y + 22, "CINMIX", INK);
-        text(x + 24, y + 62, "RELEASE 0.15", STEEL);
+        text(x + 24, y + 62, "RELEASE 0.16", STEEL);
         rect(x + 21, y + 91, cw - 42, 1, HAIR);
         text(x + 24, y + 106, "Kernel", STEEL);
-        text(x + 166, y + 106, "Cinmix 0.15", INK);
+        text(x + 166, y + 106, "Cinmix 0.16", INK);
         text(x + 24, y + 134, "Target", STEEL);
         text(x + 166, y + 134, "i386 protected", INK);
         text(x + 24, y + 162, "Firmware", STEEL);
@@ -2254,14 +2382,16 @@ static void repaint(void) {
         add_tooltip_damage(tooltip_render_app, tooltip_render_running, panel_visible(PANEL_TOOLTIP) || panel_was_visible[PANEL_TOOLTIP]);
         add_preview_damage(last_snap_side);
         add_preview_damage(snap_preview_side());
-        if (desktop_focus != last_desktop_focus) {
-            if (last_desktop_focus >= 0) {
-                int x, y; desktop_position(last_desktop_focus, &x, &y);
-                add_damage(x - 2, y - 2, 88, 76);
+        if (desktop_focus != last_desktop_focus || desktop_hover != last_desktop_hover) {
+            if (last_desktop_focus >= 0 || last_desktop_hover >= 0) {
+                int slot = last_desktop_hover >= 0 ? last_desktop_hover : last_desktop_focus;
+                int x, y, w, h; desktop_slot_bounds(slot, &x, &y, &w, &h);
+                add_damage(x - 4, y - 4, w + 8, h + 8);
             }
-            if (desktop_focus >= 0) {
-                int x, y; desktop_position(desktop_focus, &x, &y);
-                add_damage(x - 2, y - 2, 88, 76);
+            if (desktop_focus >= 0 || desktop_hover >= 0) {
+                int slot = desktop_hover >= 0 ? desktop_hover : desktop_focus;
+                int x, y, w, h; desktop_slot_bounds(slot, &x, &y, &w, &h);
+                add_damage(x - 4, y - 4, w + 8, h + 8);
             }
         }
         if (panel_visible(PANEL_SWITCHER) || panel_was_visible[PANEL_SWITCHER] || last_tab_active) {
@@ -2308,6 +2438,7 @@ static void repaint(void) {
     last_hover_visible = hover_visible;
     last_active = active_window();
     last_desktop_focus = desktop_focus;
+    last_desktop_hover = desktop_hover;
     last_tab_active = tab_active;
     last_tab_selected = tab_selected;
     last_snap_side = snap_preview_side();
@@ -2531,9 +2662,8 @@ static void handle_click(void) {
                     if (inside(mouse_x, mouse_y, xx + 20 + (k % 4) * 66, yy + 113 + (k / 4) * 47, 57, 39)) calc_press(keys[k]);
                 }
             } else if (i == FILES) {
-                for (int item = 0; item < 3; item++) {
-                    if (inside(mouse_x, mouse_y, w->x + 137, w->y + 84 + item * 37, w->w - 148, 35)) selected_file = item;
-                }
+                int hit = files_row_hit(w, mouse_x, mouse_y);
+                if (hit >= 0) selected_file = hit;
             } else if (i == APPEAR) {
                 int y = w->y + 34;
                 if (inside(mouse_x, mouse_y, w->x + w->w - 209, y + 8, 181, 35)) toggle_dark_aero();
@@ -2593,11 +2723,8 @@ static void handle_click(void) {
             return;
         }
     }
-    for (int k = 0; k < 8; k++) {
-        int x, y;
-        desktop_position(k, &x, &y);
-        if (y + 72 < sh - 52 && inside(mouse_x, mouse_y, x, y, sw >= 600 ? 87 : 73, sw >= 600 ? 77 : 54)) { open_window(desk_shortcuts[k]); return; }
-    }
+    int slot = desktop_slot_hit(mouse_x, mouse_y);
+    if (slot >= 0) { open_window(desk_shortcuts[slot]); return; }
 }
 
 static void handle_right_click(void) {
@@ -2638,10 +2765,12 @@ static void handle_mouse_byte(uint8_t b) {
     if (ny >= sh) ny = sh - 1;
     if (nx != mouse_x || ny != mouse_y) {
         int hover = taskbar_hit(nx, ny);
-        if (hover != task_hover || context_open || drag_app >= 0 || resize_app >= 0 || (left_down && active_window() == SKETCH) || hover_visible) dirty = 1;
+        int dhover = desktop_slot_hit(nx, ny);
+        if (hover != task_hover || dhover != desktop_hover || context_open || drag_app >= 0 || resize_app >= 0 || (left_down && active_window() == SKETCH) || hover_visible) dirty = 1;
         else pointer_only = 1;
         if (hover != task_hover) { hover_delay = 0; hover_visible = 0; }
         task_hover = hover;
+        desktop_hover = dhover;
         mouse_x = nx;
         mouse_y = ny;
         if (left_down && drag_app < 0 && resize_app < 0 && active_window() == SKETCH) sketch_paint(mouse_x, mouse_y);
@@ -2967,12 +3096,12 @@ void kmain(void) {
         }
     }
     notes_len = size(notes);
-    log_write("Cinmix kernel 0.15  [i386]");
+    log_write("Cinmix kernel 0.16  [i386]");
     log_write("RAM volume mounted at R:");
     init_mouse();
     init_frame_clock();
     refresh_clock();
-    notify("Cinmix 0.15 is ready");
+    notify("Cinmix 0.16 is ready");
     repaint();
     uint32_t cycles = 0;
     for (;;) {

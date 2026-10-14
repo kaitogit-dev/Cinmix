@@ -1,8 +1,8 @@
-# Cinmix 0.15 — Dark Aero
+# Cinmix 0.16 — Explorer + Desktop Hover
 
 Cinmix is a freestanding 32-bit x86 BIOS desktop operating system. It prefers a 1920×1080×32 VBE or Bochs-compatible graphics mode, with lower-resolution fallbacks. The interface combines Aero-style glass, rounded antialiased edges, a centered icon-only taskbar, and animated application windows.
 
-## What is new in 0.15
+## What is new in 0.16
 
 **Dark Aero** is a complete fourth color scheme alongside Aero, Silver and Midnight. It introduces a dark-blue translucent wallpaper, navy title bars and window content, glass panels, dark text fields and buttons, and high-contrast light text throughout Files, Notes, System, Calculator, Appearance, Start, Run, Quick Panel, Notification Center, Alt+Tab and taskbar tooltips. Dark Aero uses the existing configurable accent colors and glass strength. Switching back restores the last selected light theme rather than resetting other appearance preferences.
 
@@ -32,6 +32,6 @@ On a Linux system with GCC, GNU binutils, Python 3 and 32-bit cross-compilation 
 make verify
 ```
 
-This creates `Cinmix-0.15.iso`. Tests validate ISO9660 and El Torito structures, BIOS video mode selection, panel and window controls, 1920×1080 framebuffer composition, both color modes, theme input controls, quiet notifications and the new keyboard shortcuts. The tests run against the native software compositor and simulated input; they **do not establish actual boot or frame-rate smoothness in a BIOS emulator**. The emulator must provide a suitable 1080p framebuffer mode or Cinmix falls back to a supported resolution. At least 128 MB of RAM is recommended. Preferences remain in RAM and reset when Cinmix reboots.
+This creates `Cinmix-0.16.iso`. Tests validate ISO9660 and El Torito structures, BIOS video mode selection, panel and window controls, 1920×1080 framebuffer composition, both color modes, theme input controls, the Windows 11 style Explorer shell and desktop hover highlights. The tests run against the native software compositor and simulated input; they **do not establish actual boot or frame-rate smoothness in a BIOS emulator**. The emulator must provide a suitable 1080p framebuffer mode or Cinmix falls back to a supported resolution. At least 128 MB of RAM is recommended. Preferences remain in RAM and reset when Cinmix reboots.
 
 Software volume controls are interface state only; an audio device driver has not been implemented. Font licensing information is in `FONT-LICENSE.txt`.
