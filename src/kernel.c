@@ -1894,7 +1894,7 @@ static void window_content(int app, const Window *w) {
             text(lx + 37, yy + (file_view ? 11 : 10), files_name(id), INK);
             if (!file_view) {
                 text(lx + lw * 42 / 100, yy + 10, files_date(id), INK2);
-                text(lx + lw * 72 / 100, yy + 10, id == 3 ? "Bitmap" : id == 1 ? "Log" : id == 4 ? "Data" : "Text", INK2);
+                text(lx + lw * 72 / 100, yy + 10, id >= FILE_COUNT && pe_file_suffix(files_name(id)) ? "EXE" : id == 3 ? "Bitmap" : id == 1 ? "Log" : id == 4 ? "Data" : "Text", INK2);
                 text(lx + lw - 46, yy + 10, files_size(id), INK2);
             } else {
                 text(lx + 37, yy + 34, files_type(id), STEEL);
@@ -1920,7 +1920,7 @@ static void window_content(int app, const Window *w) {
             text(px + 17, y + 365, "Size", STEEL);
             text(px + 17, y + 389, files_size(selected_file), INK);
             rect(px + 17, y + 415, pw - 34, 1, HAIR);
-            text(px + 17, y + 435, selected_file == 2 ? "Editable in Notes" : selected_file == 3 ? "Desktop wallpaper" : selected_file == 4 ? "Calendar app data" : (storage_ready ? "Saved document on D:" : "Temporary RAM document"), INK2);
+            text(px + 17, y + 435, selected_file >= FILE_COUNT && pe_file_suffix(files_name(selected_file)) ? "PE32 console executable" : selected_file == 2 ? "Editable in Notes" : selected_file == 3 ? "Desktop wallpaper" : selected_file == 4 ? "Calendar app data" : (storage_ready ? "Saved document on D:" : "Temporary RAM document"), INK2);
             text(px + 17, y + 458, storage_ready ? "Saved on virtual hard disk" : "Temporary session storage", STEEL);
         }
     } else if (app == NOTES) {
