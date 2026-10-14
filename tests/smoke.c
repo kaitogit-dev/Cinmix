@@ -118,8 +118,8 @@ int main(void) {
     handle_click();
     check(!windows[FILES].opened);
     open_window(APPEAR);
-    mouse_x = windows[APPEAR].x + 45;
-    mouse_y = windows[APPEAR].y + 34 + 67 + 66 + 20;
+    mouse_x = windows[APPEAR].x + 2 + 164 + 34 + 145 + 35;
+    mouse_y = windows[APPEAR].y + 34 + 165 + 25;
     handle_click();
     check(theme == 1);
     theme = 0;
@@ -176,12 +176,12 @@ int main(void) {
     toggle_desktop();
     check(!desktop_hidden && !windows[FILES].minimized);
     open_window(APPEAR);
-    mouse_x = windows[APPEAR].x + 26 + 140 + 30;
-    mouse_y = windows[APPEAR].y + 34 + 298 + 18;
+    mouse_x = windows[APPEAR].x + 2 + 164 + 34 + 145 + 35;
+    mouse_y = windows[APPEAR].y + 34 + 250 + 18;
     handle_click();
     check(wallpaper == 1);
-    mouse_x = windows[APPEAR].x + 122 + 20;
-    mouse_y = windows[APPEAR].y + 34 + 353 + 12;
+    mouse_x = windows[APPEAR].x + 2 + 164 + 34 + 155 + 20;
+    mouse_y = windows[APPEAR].y + 34 + 310 + 12;
     handle_click();
     check(glass_level == 0);
     settle(4);

@@ -19,7 +19,7 @@ _start:
     cmp bx, 0xaa55
     jne failure
     mov word ptr [dap_segment], 0x1000
-    mov word ptr [remaining], 48
+    mov word ptr [remaining], 56
 load_next:
     mov si, offset dap
     mov ah, 0x42

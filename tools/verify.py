@@ -59,15 +59,16 @@ def check(iso_path, boot_path, kernel_path, elf_path):
     assert b'\x8b\x0d' + struct.pack('<I', symbols['__bss_end']) not in segment
     assert sector(boot_lba)[512:] == bytes(SECTOR - 512)
     assert iso[(boot_lba + 1) * SECTOR:(boot_lba + 1) * SECTOR + len(kernel)] == kernel
-    assert iso[(boot_lba + 1) * SECTOR + len(kernel):(boot_lba + 49) * SECTOR] == bytes(48 * SECTOR - len(kernel))
+    assert iso[(boot_lba + 1) * SECTOR + len(kernel):(boot_lba + 57) * SECTOR] == bytes(56 * SECTOR - len(kernel))
     assert b'\x21\x00\x00\x00\x00\x00\x00\x00' in boot
+    assert b'\x38\x00' in boot
     assert b'\xc7\x06\x16\x72\x80\x07' in kernel
     assert b'\xc7\x06\x18\x72\x38\x04' in kernel
     assert b'\xc7\x06\x14\x72\x00\x1e' in kernel
     assert b'\xb8\x80\x07' in kernel[:512]
     assert b'\xb8\x38\x04' in kernel[:512]
-    assert b'CINMIX_0_16' in sector(16)
-    assert b'CINMIX 0.16' in entry
+    assert b'CINMIX_0_17' in sector(16)
+    assert b'CINMIX 0.17' in entry
 
     folder = sector(22)
     names = []

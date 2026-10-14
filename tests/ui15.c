@@ -54,7 +54,7 @@ int main(void) {
     REQUIRE(!NIGHT && theme==0 && previous_theme==0 && !do_not_disturb);
     open_window(APPEAR); frames(WINDOW_OPEN_STEPS+2);
     Window *a=&windows[APPEAR];
-    click(a->x+a->w-209+90, a->y+34+8+18);
+    click(a->x+a->w-120, a->y+34+111+18);
     REQUIRE(theme==3 && previous_theme==0);
     frames(2);
     REQUIRE(cached_wallpaper_night == 1);

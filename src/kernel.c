@@ -68,7 +68,7 @@ static const uint32_t palette[4][13] = {
 typedef struct { int x; int y; int w; int h; int opened; int minimized; int order; int maximized; int restore_x; int restore_y; int restore_w; int restore_h; } Window;
 
 static Window windows[APPS];
-static const char *app_name[APPS] = {"Files", "Notes", "Console", "System", "Clock", "Calculator", "Appearance", "Sketch", "Calendar", "Windows"};
+static const char *app_name[APPS] = {"Files", "Notes", "Console", "System", "Clock", "Calculator", "Settings", "Sketch", "Calendar", "Windows"};
 static int anim_x0[APPS], anim_y0[APPS], anim_w0[APPS], anim_h0[APPS], anim_ticks[APPS], anim_total[APPS], anim_visible[APPS], anim_exit[APPS];
 static int quick_open;
 static int start_anim;
@@ -166,11 +166,24 @@ static int right_down;
 static int resize_app = -1;
 static int snap_side[APPS];
 static int selected_file;
+static int file_location = 6;
+static int file_sort;
+static int file_view;
+static int file_details = 1;
+static int file_created;
+static int file_search_focus;
+static char file_search[32];
+static int file_search_len;
+static int settings_page = 1;
+static int settings_search_focus;
+static char settings_search[32];
+static int settings_search_len;
 #define FILE_COUNT 5
 static const char *file_names[FILE_COUNT] = {"readme.txt", "boot.log", "notes.txt", "wallpaper.bmp", "calendar.dat"};
 static const char *file_types[FILE_COUNT] = {"Text Document", "Log File", "Text Document", "Bitmap Image", "Data File"};
 static const char *file_sizes[FILE_COUNT] = {"2 KB", "3 KB", "1 KB", "128 KB", "4 KB"};
 static const char *file_dates[FILE_COUNT] = {"2026-10-14 20:42", "2026-10-14 20:41", "2026-10-14 20:40", "2026-10-14 20:15", "2026-10-14 19:58"};
+static char file_extra_names[3][24] = {"New document.txt", "New document 2.txt", "New document 3.txt"};
 static int sketch_color = 1;
 static int sketch_brush = 1;
 static uint8_t sketch_pixels[SKETCH_H][SKETCH_W];
@@ -1142,7 +1155,7 @@ static void execute_command(void) {
     log_write(linebuf);
     if (!console_len) return;
     if (same(console_input, "help")) print_info();
-    else if (same(console_input, "ver")) log_write("Cinmix 0.16  |  kernel 0.16  |  i386");
+    else if (same(console_input, "ver")) log_write("Cinmix 0.17  |  kernel 0.17  |  i386");
     else if (same(console_input, "clear")) log_count = 0;
     else if (same(console_input, "context")) log_write("Right click on desktop");
     else if (same(console_input, "dark")) { select_theme(3); log_write("Dark Aero enabled"); }
@@ -1155,7 +1168,7 @@ static void execute_command(void) {
         log_write("/ram/readme.txt");
         log_write("/ram/boot.log");
         log_write("/ram/notes.txt");
-    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix kernel 0.16; Explorer shell; RAM volume");
+    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix kernel 0.17; Explorer shell; RAM volume");
     else if (same(console_input, "cat boot.log")) log_write("El Torito -> kernel -> protected mode -> UI");
     else if (same(console_input, "cat notes.txt")) {
         char one[72] = "";
@@ -1315,6 +1328,8 @@ static void toggle_desktop(void) {
 }
 
 static void open_window(int app) {
+    if (app != FILES) file_search_focus=0;
+    if (app != APPEAR) settings_search_focus=0;
     desktop_focus = -1;
     desktop_hidden = 0;
     run_open = 0;
@@ -1375,23 +1390,136 @@ static void undo_sketch(void) {
 }
 
 static int files_nav_width(int cw) { return cw >= 900 ? 188 : 156; }
-static int files_preview_width(int cw) { return cw >= 920 ? 222 : (cw >= 760 ? 178 : 0); }
+static int files_preview_width(int cw) { return file_details ? (cw >= 920 ? 222 : cw >= 760 ? 178 : 0) : 0; }
 static int files_list_left(int x, int cw) { return x + files_nav_width(cw) + 28; }
 static int files_list_width(int cw) { return cw - files_nav_width(cw) - files_preview_width(cw) - 48; }
 static int files_row_top(int y) { return y + 134; }
-static int files_row_height(void) { return 37; }
-static int files_row_hit(const Window *w, int px, int py) {
-    int x = w->x + 2;
-    int y = w->y + 34;
-    int cw = w->w - 4;
-    int row_x = files_list_left(x, cw);
-    int row_w = files_list_width(cw);
-    int row_y = files_row_top(y);
-    int row_h = files_row_height();
-    for (int i = 0; i < FILE_COUNT; i++) {
-        if (inside(px, py, row_x, row_y + i * row_h, row_w, row_h - 1)) return i;
+static int files_row_height(void) { return file_view ? 66 : 37; }
+static int files_count(void) { return FILE_COUNT + file_created; }
+static const char *files_name(int id) { return id < FILE_COUNT ? file_names[id] : file_extra_names[id - FILE_COUNT]; }
+static const char *files_type(int id) { return id < FILE_COUNT ? file_types[id] : "Text Document"; }
+static const char *files_size(int id) { return id < FILE_COUNT ? file_sizes[id] : "0 KB"; }
+static const char *files_date(int id) { return id < FILE_COUNT ? file_dates[id] : "2026-10-14 21:00"; }
+static int files_filter(int id) {
+    if (file_location == 1 && id > 2) return 0;
+    if (file_location == 2 && id != 3) return 0;
+    if (file_location == 3 && id != 0 && id != 2 && id < FILE_COUNT) return 0;
+    if (file_location == 4 && id != 1) return 0;
+    if (file_location == 5 && id != 3) return 0;
+    if (file_search_len) {
+        const char *name = files_name(id);
+        for (int start = 0; name[start]; start++) {
+            int pos = 0;
+            while (pos < file_search_len && name[start + pos]) {
+                char a = name[start + pos], b = file_search[pos];
+                if (a >= 'A' && a <= 'Z') a += 32;
+                if (b >= 'A' && b <= 'Z') b += 32;
+                if (a != b) break;
+                pos++;
+            }
+            if (pos == file_search_len) return 1;
+        }
+        return 0;
+    }
+    return 1;
+}
+static int files_item(int row) {
+    int count = files_count(), n = 0;
+    for (int k = 0; k < count; k++) {
+        int id = file_sort == 1 ? count - k - 1 : k;
+        if (files_filter(id)) {
+            if (n++ == row) return id;
+        }
     }
     return -1;
+}
+static int files_visible_count(void) {
+    int n = 0;
+    for (int i = 0; i < files_count(); i++) if (files_filter(i)) n++;
+    return n;
+}
+static int files_row_hit(const Window *w, int px, int py) {
+    int x = w->x + 2, y = w->y + 34, cw = w->w - 4;
+    int row_x = files_list_left(x, cw);
+    int row_y = files_row_top(y), row_h = files_row_height();
+    if (!inside(px, py, row_x, row_y, files_list_width(cw), row_h * files_count())) return -1;
+    return files_item((py - row_y) / row_h);
+}
+static void files_open_selected(void) {
+    if (selected_file == 2 || selected_file >= FILE_COUNT) open_window(NOTES);
+    else if (selected_file == 3) open_window(APPEAR);
+    else if (selected_file == 4) open_window(CALENDAR);
+    else dirty = 1;
+}
+static int files_action(const Window *w, int px, int py) {
+    int x = w->x + 2, y = w->y + 34, cw = w->w - 4;
+    int nw = files_nav_width(cw);
+    if (inside(px, py, x + 24, y + 15, 60, 24)) {
+        if (file_created < 3) { selected_file = FILE_COUNT + file_created++; file_location = 6; file_search_len = 0; file_search[0] = 0; }
+        file_search_focus = 0; return 1;
+    }
+    if (inside(px, py, x + 92, y + 15, 60, 24)) { file_sort = !file_sort; file_search_focus = 0; return 1; }
+    if (inside(px, py, x + 160, y + 15, 60, 24)) { file_view = !file_view; file_search_focus = 0; return 1; }
+    if (inside(px, py, x + 218, y + 15, 38, 24)) { file_details = !file_details; file_search_focus = 0; return 1; }
+    if (inside(px, py, x + cw - 168, y + 52, 154, 30)) { file_search_focus = 1; return 1; }
+    if (inside(px, py, x + 14, y + 52, cw - 212, 30)) { file_location = 6; file_search_focus = 0; return 1; }
+    for (int k = 0; k < 7; k++) {
+        if (inside(px, py, x + 19, y + 128 + k * 36, nw - 14, 30)) {
+            file_location = k; file_search_focus = 0; return 1;
+        }
+    }
+    int id = files_row_hit(w, px, py);
+    if (id >= 0) { selected_file = id; file_search_focus = 0; return 1; }
+    file_search_focus = 0;
+    return 0;
+}
+static int settings_action(const Window *w, int px, int py) {
+    int x = w->x + 2, y = w->y + 34, cw = w->w - 4;
+    int nw = cw >= 850 ? 210 : 164;
+    int mx = x + nw + 34, mw = cw - nw - 55;
+    if (inside(px,py,x+16,y+56,nw-8,34)) { settings_search_focus = 1; return 1; }
+    settings_search_focus = 0;
+    for (int k = 0; k < 5; k++) {
+        if (inside(px,py,x+18,y+119+k*47,nw-10,39)) { settings_page = k; return 1; }
+    }
+    if (settings_page == 1) {
+        int compact = w->h - 36 < 590;
+        int mode_y = compact ? 70 : 93;
+        int theme_y = compact ? 165 : 217;
+        int wall_y = compact ? 250 : 328;
+        int glass_y = compact ? 310 : 407;
+        int accent_y = compact ? 370 : 461;
+        if (inside(px,py,mx+mw-151,y+mode_y+18,128,36)) { toggle_dark_aero(); return 1; }
+        for (int k = 0; k < 3; k++) {
+            if (inside(px,py,mx+k*145,y+theme_y,132,compact ? 52 : 66)) { select_theme(k); return 1; }
+            if (inside(px,py,mx+k*145,y+wall_y,132,compact ? 52 : 64)) { wallpaper=k; return 1; }
+            if (inside(px,py,mx+155+k*80,y+glass_y,71,32)) { glass_level=k; return 1; }
+        }
+        for (int k = 0; k < 4; k++) if (inside(px,py,mx+155+k*65,y+accent_y,45,36)) { accent_index=k; return 1; }
+    } else if (settings_page == 0) {
+        if (inside(px,py,mx+22,y+292,58,34)) { volume_level = volume_level >= 10 ? volume_level-10 : 0; volume_muted=0; return 1; }
+        if (inside(px,py,mx+92,y+292,58,34)) { volume_level = volume_level <= 90 ? volume_level+10 : 100; volume_muted=0; return 1; }
+        if (inside(px,py,mx+163,y+292,112,34)) { volume_muted=!volume_muted; return 1; }
+    } else if (settings_page == 2) {
+        for (int k = 0; k < APPS; k++) {
+            int yy=y+95+k*45;
+            if (yy+40 >= y+w->h-36-14) break;
+            if (inside(px,py,mx+mw-89,yy+6,73,28)) { open_window(k); return 1; }
+        }
+    } else if (settings_page == 3) {
+        if (inside(px,py,mx+mw-103,y+117,80,33)) { toggle_quiet(); return 1; }
+        if (inside(px,py,mx+mw-142,y+232,121,33)) { notification_count=0; notification_unread=0; return 1; }
+    }
+    return 0;
+}
+static void settings_search_apply(void) {
+    if (same_fold(settings_search,"system") || same_fold(settings_search,"display") || same_fold(settings_search,"volume") || same_fold(settings_search,"sound")) settings_page=0;
+    else if (same_fold(settings_search,"theme") || same_fold(settings_search,"dark") || same_fold(settings_search,"wallpaper") || same_fold(settings_search,"personalization") || same_fold(settings_search,"accent")) settings_page=1;
+    else if (same_fold(settings_search,"apps")) settings_page=2;
+    else if (same_fold(settings_search,"notifications") || same_fold(settings_search,"quiet")) settings_page=3;
+    else if (same_fold(settings_search,"about")) settings_page=4;
+    settings_search_focus=0;
+    dirty=1;
 }
 
 static int menu_row_app(int row) {
@@ -1438,101 +1566,84 @@ static void window_content(int app, const Window *w) {
     }
     rect(x, y, cw, ch, PAPER);
     if (app == FILES) {
-        int nav_w = files_nav_width(cw);
-        int preview_w = files_preview_width(cw);
-        int list_x = files_list_left(x, cw);
-        int list_w = files_list_width(cw);
-        int list_y = files_row_top(y);
-        int row_h = files_row_height();
-        int preview_x = x + cw - preview_w - 14;
+        int nw = files_nav_width(cw), pw = files_preview_width(cw);
+        int lx = files_list_left(x, cw), lw = files_list_width(cw);
+        int py = files_row_top(y), rh = files_row_height();
+        int px = x + cw - pw - 14;
         rounded(x + 14, y + 10, cw - 28, 34, 10, UI_FIELD);
         outline(x + 14, y + 10, cw - 28, 34, UI_EDGE);
-        const char *actions[4] = {"New", "Sort", "View", "..."};
-        for (int i = 0; i < 4; i++) {
-            int bw = i == 3 ? 38 : 60;
-            int bx = x + 24 + (i < 3 ? i * 68 : 3 * 68 - 10);
-            rounded(bx, y + 15, bw, 24, 8, i == 0 ? (NIGHT ? 0x355574 : 0xcfe9fb) : (NIGHT ? 0x22384e : 0xffffff));
-            outline(bx, y + 15, bw, 24, i == 0 ? UI_EDGE : HAIR);
-            text(bx + (i == 3 ? 14 : 16), y + 21, actions[i], i == 0 ? BLUE : INK);
+        for (int k = 0; k < 4; k++) {
+            int bx = x + (k == 3 ? 218 : 24 + k * 68), bw = k == 3 ? 38 : 60;
+            rounded(bx, y + 15, bw, 24, 7, k == 0 ? UI_HOVER : UI_CARD);
+            text(bx + 12, y + 21, k == 0 ? "New" : k == 1 ? (file_sort ? "Z-A" : "Sort") : k == 2 ? (file_view ? "List" : "View") : "...", INK);
         }
-        rounded(x + 14, y + 52, cw - 28 - 170, 30, 10, WHITE);
-        outline(x + 14, y + 52, cw - 28 - 170, 30, HAIR);
-        text(x + 29, y + 59, "This PC  >  RAM (R:)", INK);
-        rounded(x + cw - 168, y + 52, 154, 30, 10, UI_FIELD);
-        outline(x + cw - 168, y + 52, 154, 30, UI_EDGE);
-        text(x + cw - 148, y + 59, "Search RAM (R:)", STEEL);
-
-        rounded(x + 12, y + 92, nav_w, ch - 104, 13, LIGHT);
-        outline(x + 12, y + 92, nav_w, ch - 104, HAIR);
-        text(x + 26, y + 106, "Home", INK2);
-        const char *nav_items[6] = {"Quick access", "Desktop", "Documents", "Downloads", "Pictures", "RAM (R:)"};
-        for (int i = 0; i < 6; i++) {
-            int py = y + 130 + i * 34;
-            int active = i == 5;
-            if (active) rounded(x + 20, py - 4, nav_w - 16, 28, 9, NIGHT ? 0x35516f : 0xdceefa);
-            rounded(x + 26, py + 3, 14, 14, 4, i == 5 ? 0xe8bd79 : (NIGHT ? 0x42617f : 0x8bb6d6));
-            text(x + 48, py, nav_items[i], active ? INK : INK2);
+        rounded(x + 14, y + 52, cw - 212, 30, 9, UI_CARD);
+        outline(x + 14, y + 52, cw - 212, 30, HAIR);
+        text(x + 27, y + 59, file_location == 6 ? "This PC  >  RAM (R:)" : "Home  >  RAM (R:)", INK);
+        rounded(x + cw - 168, y + 52, 154, 30, 9, UI_FIELD);
+        outline(x + cw - 168, y + 52, 154, 30, file_search_focus ? BLUE : UI_EDGE);
+        text(x + cw - 158, y + 59, file_search_len ? file_search : "Search RAM", file_search_len ? INK : STEEL);
+        if (file_search_focus) rect(x + cw - 158 + file_search_len * 8, y + 75, 6, 2, BLUE);
+        rounded(x + 12, y + 92, nw, ch - 104, 12, LIGHT);
+        text(x + 26, y + 103, "This PC", INK);
+        const char *nav[7] = {"Home", "Quick access", "Desktop", "Documents", "Downloads", "Pictures", "RAM (R:)"};
+        for (int k = 0; k < 7; k++) {
+            int yy = y + 132 + k * 36;
+            if (file_location == k) rounded(x + 19, yy - 4, nw - 14, 30, 8, UI_HOVER);
+            rounded(x + 27, yy + 5, 13, 13, 3, k == 6 ? 0xe8bd79 : (NIGHT ? 0x42617f : 0x8bb6d6));
+            text(x + 47, yy + 2, nav[k], file_location == k ? BLUE : INK2);
         }
-
-        if (preview_w) {
-            rounded(preview_x, y + 92, preview_w, ch - 104, 13, LIGHT);
-            outline(preview_x, y + 92, preview_w, ch - 104, HAIR);
+        if (pw) {
+            rounded(px, y + 92, pw, ch - 104, 12, LIGHT);
+            outline(px, y + 92, pw, ch - 104, HAIR);
         }
-        text(list_x, y + 102, "Name", STEEL);
-        text(list_x + (list_w * 46) / 100, y + 102, "Date modified", STEEL);
-        text(list_x + (list_w * 74) / 100, y + 102, "Type", STEEL);
-        text(list_x + list_w - 44, y + 102, "Size", STEEL);
-        rect(list_x, y + 120, list_w, 1, HAIR);
-        for (int i = 0; i < FILE_COUNT; i++) {
-            int ry = list_y + i * row_h;
-            if (selected_file == i) rounded(list_x, ry, list_w, row_h - 2, 10, NIGHT ? 0x35506b : 0xd8edf9);
-            else if (i & 1) rounded(list_x, ry, list_w, row_h - 2, 10, NIGHT ? 0x1d2c3c : 0xf7fbff);
-            rounded(list_x + 10, ry + 8, 16, 18, 4, WHITE);
-            outline(list_x + 10, ry + 8, 16, 18, STEEL);
-            rect(list_x + 13, ry + 13, 10, 1, HAIR);
-            rect(list_x + 13, ry + 17, 8, 1, HAIR);
-            text(list_x + 34, ry + 10, file_names[i], INK);
-            text(list_x + (list_w * 46) / 100, ry + 10, file_dates[i], INK2);
-            text(list_x + (list_w * 74) / 100, ry + 10, file_types[i], INK2);
-            text(list_x + list_w - 44, ry + 10, file_sizes[i], INK2);
+        text(lx + 5, y + 103, "Name", STEEL);
+        if (!file_view) {
+            text(lx + lw * 42 / 100, y + 103, "Date modified", STEEL);
+            text(lx + lw * 72 / 100, y + 103, "Type", STEEL);
+            text(lx + lw - 46, y + 103, "Size", STEEL);
         }
-        rect(list_x, y + ch - 42, list_w, 1, HAIR);
-        text(list_x, y + ch - 31, "5 items", STEEL);
-        text(list_x + 80, y + ch - 31, "Details", STEEL);
-        if (preview_w) {
-            text(preview_x + 18, y + 106, "Details", STEEL);
-            rounded(preview_x + 22, y + 132, preview_w - 44, 116, 16, UI_FIELD);
-            outline(preview_x + 22, y + 132, preview_w - 44, 116, UI_EDGE);
-            rounded(preview_x + 38, y + 152, 38, 46, 8, WHITE);
-            outline(preview_x + 38, y + 152, 38, 46, STEEL);
-            rect(preview_x + 45, y + 164, 20, 2, HAIR);
-            rect(preview_x + 45, y + 174, 18, 2, HAIR);
-            rect(preview_x + 45, y + 184, 14, 2, HAIR);
-            text(preview_x + 88, y + 154, file_names[selected_file], INK);
-            text(preview_x + 88, y + 176, file_types[selected_file], STEEL);
-            text(preview_x + 18, y + 269, "Location", STEEL);
-            text(preview_x + 18, y + 291, "RAM (R:) /", INK);
-            text(preview_x + 18, y + 322, "Modified", STEEL);
-            text(preview_x + 18, y + 344, file_dates[selected_file], INK);
-            text(preview_x + 18, y + 375, "Size", STEEL);
-            text(preview_x + 18, y + 397, file_sizes[selected_file], INK);
-            rect(preview_x + 18, y + 427, preview_w - 36, 1, HAIR);
-            if (selected_file == 0) {
-                text(preview_x + 18, y + 443, "Cinmix 0.16", INK);
-                text(preview_x + 18, y + 464, "Dark Aero + Explorer", STEEL);
-            } else if (selected_file == 1) {
-                text(preview_x + 18, y + 443, "Boot successful", INK);
-                text(preview_x + 18, y + 464, "Framebuffer 1920x1080", STEEL);
-            } else if (selected_file == 2) {
-                text(preview_x + 18, y + 443, notes_len ? notes : "No notes yet", INK);
-                text(preview_x + 18, y + 464, "Volatile document", STEEL);
-            } else if (selected_file == 3) {
-                text(preview_x + 18, y + 443, "Aurora wallpaper asset", INK);
-                text(preview_x + 18, y + 464, "Bitmap preview available", STEEL);
+        rect(lx, y + 121, lw, 1, HAIR);
+        int shown = files_visible_count();
+        for (int row = 0; row < shown; row++) {
+            int id = files_item(row), yy = py + row * rh;
+            if (yy + rh >= y + ch - 49) break;
+            if (selected_file == id) rounded(lx, yy, lw, rh - 2, 9, UI_HOVER);
+            else if (row & 1) rounded(lx, yy, lw, rh - 2, 9, NIGHT ? 0x1d2c3c : 0xf7fbff);
+            rounded(lx + 12, yy + 9, 17, 20, 4, WHITE);
+            outline(lx + 12, yy + 9, 17, 20, STEEL);
+            rect(lx + 16, yy + 15, 9, 2, HAIR);
+            text(lx + 37, yy + (file_view ? 11 : 10), files_name(id), INK);
+            if (!file_view) {
+                text(lx + lw * 42 / 100, yy + 10, files_date(id), INK2);
+                text(lx + lw * 72 / 100, yy + 10, id == 3 ? "Bitmap" : id == 1 ? "Log" : id == 4 ? "Data" : "Text", INK2);
+                text(lx + lw - 46, yy + 10, files_size(id), INK2);
             } else {
-                text(preview_x + 18, y + 443, "Calendar cache", INK);
-                text(preview_x + 18, y + 464, "Structured app data", STEEL);
+                text(lx + 37, yy + 34, files_type(id), STEEL);
+                text(lx + lw - 64, yy + 11, files_size(id), STEEL);
             }
+        }
+        if (!shown) text(lx + 20, py + 26, "No files match your search", STEEL);
+        rect(lx, y + ch - 43, lw, 1, HAIR);
+        char count[12]; number(count, (uint32_t)shown);
+        text(lx + 5, y + ch - 32, count, INK2);
+        text(lx + 22, y + ch - 32, "items in RAM", STEEL);
+        if (pw) {
+            text(px + 17, y + 106, "Details", INK);
+            rounded(px + 17, y + 139, pw - 34, 91, 10, UI_CARD);
+            rounded(px + 32, y + 157, 35, 43, 5, WHITE);
+            outline(px + 32, y + 157, 35, 43, STEEL);
+            text(px + 78, y + 151, files_name(selected_file), INK);
+            text(px + 78, y + 174, files_type(selected_file), STEEL);
+            text(px + 17, y + 251, "Location", STEEL);
+            text(px + 17, y + 274, "RAM (R:)", INK);
+            text(px + 17, y + 309, "Modified", STEEL);
+            text(px + 17, y + 333, files_date(selected_file), INK);
+            text(px + 17, y + 365, "Size", STEEL);
+            text(px + 17, y + 389, files_size(selected_file), INK);
+            rect(px + 17, y + 415, pw - 34, 1, HAIR);
+            text(px + 17, y + 435, selected_file == 2 ? "Editable in Notes" : selected_file == 3 ? "Desktop wallpaper" : selected_file == 4 ? "Calendar app data" : "Virtual RAM document", INK2);
+            text(px + 17, y + 458, "Temporary session storage", STEEL);
         }
     } else if (app == NOTES) {
         rect(x, y, cw, 27, LIGHT);
@@ -1582,10 +1693,10 @@ static void window_content(int app, const Window *w) {
     } else if (app == SYSTEM) {
         rect(x, y, cw, 4, BLUE);
         big_text(x + 21, y + 22, "CINMIX", INK);
-        text(x + 24, y + 62, "RELEASE 0.16", STEEL);
+        text(x + 24, y + 62, "RELEASE 0.17", STEEL);
         rect(x + 21, y + 91, cw - 42, 1, HAIR);
         text(x + 24, y + 106, "Kernel", STEEL);
-        text(x + 166, y + 106, "Cinmix 0.16", INK);
+        text(x + 166, y + 106, "Cinmix 0.17", INK);
         text(x + 24, y + 134, "Target", STEEL);
         text(x + 166, y + 134, "i386 protected", INK);
         text(x + 24, y + 162, "Firmware", STEEL);
@@ -1610,50 +1721,120 @@ static void window_content(int app, const Window *w) {
         big_text(x + 22, y + 156, clock_date, BLUE);
         text(x + 22, y + 230, "CMOS clock", STEEL);
     } else if (app == APPEAR) {
-        text(x + 24, y + 19, "COLOR SCHEME", STEEL);
-        rounded(x + cw - 207, y + 8, 181, 35, 10, NIGHT ? 0x344d69 : LIGHT);
-        outline(x + cw - 207, y + 8, 181, 35, NIGHT ? BLUE : HAIR);
-        rect(x + cw - 194, y + 18, 15, 15, NIGHT ? 0x78b9f2 : 0x263850);
-        text(x + cw - 171, y + 18, NIGHT ? "Dark Aero: ON" : "Dark Aero: OFF", INK);
-        rect(x + 22, y + 51, cw - 44, 1, HAIR);
-        const char *labels[3] = {"Aero", "Silver", "Midnight"};
-        const uint32_t samples[3][3] = {
-            {0x2167b3,0x96cfee,0xf2f7fc},
-            {0x6189b1,0xd4eaf8,0xfafcff},
-            {0x122c58,0x578dcc,0xe3eaf7}
-        };
-        for (int k = 0; k < 3; k++) {
-            int yy = y + 67 + k * 66;
-            rect(x + 22, yy, cw - 44, 54, theme == k ? LIGHT : PAPER);
-            outline(x + 22, yy, cw - 44, 54, theme == k ? BLUE : HAIR);
-            rect(x + 32, yy + 10, 60, 34, samples[k][0]);
-            rect(x + 48, yy + 19, 24, 13, samples[k][2]);
-            rect(x + 48, yy + 19, 24, 3, samples[k][1]);
-            text(x + 111, yy + 18, labels[k], INK);
-            if (theme == k) text(x + cw - 89, yy + 18, "ACTIVE", BLUE);
+        int nw = cw >= 850 ? 210 : 164;
+        int mx = x + nw + 34, mw = cw - nw - 55;
+        rect(x + nw + 14, y + 13, 1, ch - 26, HAIR);
+        text(x + 25, y + 21, "Settings", INK);
+        rounded(x + 16, y + 56, nw - 8, 34, 9, UI_FIELD);
+        outline(x + 16, y + 56, nw - 8, 34, settings_search_focus ? BLUE : UI_EDGE);
+        text(x + 27, y + 65, settings_search_len ? settings_search : "Find a setting", settings_search_len ? INK : STEEL);
+        static const char *pages[5] = {"System", "Personalization", "Apps", "Notifications", "About"};
+        for (int k = 0; k < 5; k++) {
+            int yy = y + 122 + k * 47;
+            if (settings_page == k) rounded(x + 18, yy - 3, nw - 10, 39, 10, UI_HOVER);
+            rounded(x + 26, yy + 8, 18, 18, 5, settings_page == k ? BLUE : STEEL);
+            text(x + 55, yy + 9, pages[k], settings_page == k ? INK : INK2);
         }
-        text(x + 24, y + 274, "WALLPAPER", STEEL);
-        const char *backgrounds[3] = {"Aurora", "Lagoon", "Twilight"};
-        for (int k = 0; k < 3; k++) {
-            int px = x + 24 + k * 140;
-            rounded(px, y + 298, 129, 43, 5, wallpaper == k ? 0xb8d8f0 : LIGHT);
-            outline(px, y + 298, 129, 43, wallpaper == k ? BLUE : HAIR);
-            text(px + 14, y + 310, backgrounds[k], INK);
-        }
-        text(x + 24, y + 358, "GLASS", STEEL);
-        for (int k = 0; k < 3; k++) {
-            int px = x + 120 + k * 79;
-            rounded(px, y + 353, 67, 29, 4, glass_level == k ? 0xb1d9f4 : LIGHT);
-            outline(px, y + 353, 67, 29, glass_level == k ? BLUE : HAIR);
-            text(px + 15, y + 359, k == 0 ? "Low" : k == 1 ? "Med" : "High", INK);
-        }
-        text(x + 24, y + 406, "ACCENT", STEEL);
-        for (int k = 0; k < 4; k++) {
-            int px = x + 120 + k * 62;
-            round_capture(px, y + 397, 39, 31, 8);
-            rounded(px, y + 397, 39, 31, 8, accent_colors[k]);
-            if (accent_index == k) rounded(px + 12, y + 408, 15, 8, 3, WHITE);
-            round_finish(px, y + 397, 39, 31, 8);
+        rect(x + 22, y + ch - 75, nw - 20, 1, HAIR);
+        text(x + 27, y + ch - 57, "Cinmix 0.17", STEEL);
+        text(x + 27, y + ch - 37, "1920 x 1080", STEEL);
+        big_text(mx, y + 18, pages[settings_page], INK);
+        if (settings_page == 1) {
+            int compact = ch < 590;
+            int mode_y = compact ? 70 : 93;
+            int theme_y = compact ? 165 : 217;
+            int wall_y = compact ? 250 : 328;
+            int glass_y = compact ? 310 : 407;
+            int accent_y = compact ? 370 : 461;
+            text(mx + 2, y + 59, "Theme, backgrounds, colors and transparency", STEEL);
+            rounded(mx, y + mode_y, mw, compact ? 61 : 79, 12, UI_CARD);
+            text(mx + 19, y + mode_y + 14, "Choose your mode", INK);
+            text(mx + 19, y + mode_y + 39, "Aero glass appearance", STEEL);
+            rounded(mx + mw - 151, y + mode_y + 18, 128, 36, 10, NIGHT ? 0x416586 : 0xd0eafa);
+            text(mx + mw - 133, y + mode_y + 27, NIGHT ? "Dark Aero" : "Light Aero", INK);
+            text(mx + 2, y + theme_y - 27, "Color theme", INK);
+            for (int k = 0; k < 3; k++) {
+                int bx = mx + k * 145;
+                rounded(bx, y + theme_y, 132, compact ? 52 : 66, 10, (NIGHT ? previous_theme : theme) == k ? UI_HOVER : UI_CARD);
+                outline(bx, y + theme_y, 132, compact ? 52 : 66, (NIGHT ? previous_theme : theme) == k ? BLUE : HAIR);
+                rounded(bx + 12, y + theme_y + 12, 36, 21, 5, k == 0 ? 0x3774b8 : k == 1 ? 0x8eb4d5 : 0x1b325b);
+                text(bx + 56, y + theme_y + 16, k == 0 ? "Aero" : k == 1 ? "Silver" : "Midnight", INK);
+            }
+            text(mx + 2, y + wall_y - 27, "Wallpaper", INK);
+            for (int k = 0; k < 3; k++) {
+                int bx = mx + k * 145;
+                rounded(bx, y + wall_y, 132, compact ? 52 : 64, 10, wallpaper == k ? UI_HOVER : UI_CARD);
+                outline(bx, y + wall_y, 132, compact ? 52 : 64, wallpaper == k ? BLUE : HAIR);
+                rounded(bx + 9, y + wall_y + 8, 48, 44, 6, k == 0 ? 0x236bb0 : k == 1 ? 0x329bac : 0x455b99);
+                text(bx + 61, y + wall_y + 19, k == 0 ? "Aurora" : k == 1 ? "Lagoon" : "Twilight", INK);
+            }
+            text(mx + 2, y + glass_y + 7, "Glass strength", INK);
+            for (int k = 0; k < 3; k++) {
+                int bx = mx + 155 + k * 80;
+                rounded(bx, y + glass_y, 71, 32, 8, glass_level == k ? UI_HOVER : UI_CARD);
+                outline(bx, y + glass_y, 71, 32, glass_level == k ? BLUE : HAIR);
+                text(bx + 18, y + glass_y + 9, k == 0 ? "Low" : k == 1 ? "Med" : "High", INK);
+            }
+            text(mx + 2, y + accent_y + 7, "Accent color", INK);
+            for (int k = 0; k < 4; k++) {
+                int bx = mx + 155 + k * 65;
+                rounded(bx, y + accent_y, 45, 36, 9, accent_colors[k]);
+                if (accent_index == k) rounded(bx + 15, y + accent_y + 13, 16, 9, 4, WHITE);
+            }
+        } else if (settings_page == 0) {
+            text(mx + 2, y + 61, "Display, sound and device information", STEEL);
+            rounded(mx, y + 92, mw, 96, 12, UI_CARD);
+            text(mx + 22, y + 108, "Display", INK);
+            char dims[40] = "Resolution: ", tmp[12];
+            number(tmp, (uint32_t)sw); append(dims, tmp, 40); append(dims, " x ", 40);
+            number(tmp, (uint32_t)sh); append(dims, tmp, 40);
+            text(mx + 22, y + 136, dims, STEEL);
+            text(mx + 22, y + 161, "32-bit framebuffer / BIOS graphics", STEEL);
+            rounded(mx, y + 204, mw, 166, 12, UI_CARD);
+            text(mx + 22, y + 223, "Sound (software control)", INK);
+            text(mx + 22, y + 254, "Output requires an audio device driver", STEEL);
+            rounded(mx + 22, y + 292, 58, 34, 9, UI_HOVER);
+            rounded(mx + 92, y + 292, 58, 34, 9, UI_HOVER);
+            rounded(mx + 163, y + 292, 112, 34, 9, UI_HOVER);
+            text(mx + 47, y + 301, "-", INK);
+            text(mx + 117, y + 301, "+", INK);
+            text(mx + 187, y + 301, volume_muted ? "Unmute" : "Mute", INK);
+            number(tmp, (uint32_t)volume_level); text(mx + 295, y + 301, tmp, INK);
+            rounded(mx, y + 390, mw, 109, 12, UI_CARD);
+            text(mx + 22, y + 409, "Storage", INK);
+            text(mx + 22, y + 440, "RAM (R:) / temporary session", STEEL);
+            text(mx + 22, y + 466, "Files are reset when Cinmix reboots", STEEL);
+        } else if (settings_page == 2) {
+            text(mx + 2, y + 61, "Installed applications", STEEL);
+            for (int k = 0; k < APPS; k++) {
+                int yy = y + 95 + k * 45;
+                if (yy + 40 >= y + ch - 14) break;
+                rounded(mx, yy, mw, 41, 9, UI_CARD);
+                text(mx + 22, yy + 11, app_name[k], INK);
+                rounded(mx + mw - 89, yy + 6, 73, 28, 8, UI_HOVER);
+                text(mx + mw - 74, yy + 13, "Open", BLUE);
+            }
+        } else if (settings_page == 3) {
+            text(mx + 2, y + 61, "Notification preferences", STEEL);
+            rounded(mx, y + 93, mw, 93, 12, UI_CARD);
+            text(mx + 20, y + 110, "Quiet mode", INK);
+            text(mx + 20, y + 138, "Hide unread badge; keep notification history", STEEL);
+            rounded(mx + mw - 103, y + 117, 80, 33, 9, UI_HOVER);
+            text(mx + mw - 86, y + 125, do_not_disturb ? "On" : "Off", INK);
+            rounded(mx, y + 206, mw, 89, 12, UI_CARD);
+            text(mx + 20, y + 226, "Notification history", INK);
+            char count[12]; number(count, (uint32_t)notification_count);
+            text(mx + 20, y + 254, count, STEEL);
+            rounded(mx + mw - 142, y + 232, 121, 33, 9, UI_HOVER);
+            text(mx + mw - 127, y + 240, "Clear all", INK);
+        } else {
+            text(mx + 2, y + 61, "About Cinmix", STEEL);
+            rounded(mx, y + 93, mw, 222, 12, UI_CARD);
+            big_text(mx + 20, y + 116, "Cinmix 0.17", INK);
+            text(mx + 23, y + 162, "32-bit i386 operating system", STEEL);
+            text(mx + 23, y + 193, "Legacy BIOS / El Torito boot", STEEL);
+            text(mx + 23, y + 224, "Aero desktop with Dark Aero", STEEL);
+            text(mx + 23, y + 255, "Session data is volatile RAM storage", STEEL);
         }
     } else if (app == SKETCH) {
         text(x + 18, y + 16, "UNTITLED", INK);
@@ -2662,17 +2843,9 @@ static void handle_click(void) {
                     if (inside(mouse_x, mouse_y, xx + 20 + (k % 4) * 66, yy + 113 + (k / 4) * 47, 57, 39)) calc_press(keys[k]);
                 }
             } else if (i == FILES) {
-                int hit = files_row_hit(w, mouse_x, mouse_y);
-                if (hit >= 0) selected_file = hit;
+                files_action(w, mouse_x, mouse_y);
             } else if (i == APPEAR) {
-                int y = w->y + 34;
-                if (inside(mouse_x, mouse_y, w->x + w->w - 209, y + 8, 181, 35)) toggle_dark_aero();
-                for (int k = 0; k < 3; k++) {
-                    if (inside(mouse_x, mouse_y, w->x + 24, y + 67 + 66 * k, w->w - 48, 54)) select_theme(k);
-                    if (inside(mouse_x, mouse_y, w->x + 26 + k * 140, y + 298, 129, 43)) wallpaper = k;
-                    if (inside(mouse_x, mouse_y, w->x + 122 + k * 79, y + 353, 67, 29)) glass_level = k;
-                    if (inside(mouse_x, mouse_y, w->x + 2 + 120 + k * 62, y + 397, 39, 31)) accent_index = k;
-                }
+                settings_action(w, mouse_x, mouse_y);
             } else if (i == CALENDAR) {
                 int xx = w->x + 2;
                 int yy = w->y + 34;
@@ -2835,6 +3008,7 @@ static void handle_key(uint8_t code) {
     }
     if (released) return;
     if (key == 0x01) {
+        if (file_search_focus || settings_search_focus) { file_search_focus=0; settings_search_focus=0; dirty=1; return; }
         finish_switcher(0);
         desktop_focus = -1;
         run_open = 0;
@@ -2936,6 +3110,42 @@ static void handle_key(uint8_t code) {
     if (control_down && key == 0x25) { open_window(CALENDAR); return; }
     if (control_down && key == 0x11) { open_window(WINDOWS_APP); return; }
     int app = active_window();
+    if (app == FILES) {
+        if (control_down && key == 0x21) { file_search_focus=1; dirty=1; return; }
+        if (file_search_focus) {
+            if (key == 0x0e && file_search_len) file_search[--file_search_len]=0;
+            else if (key == 0x1c) file_search_focus=0;
+            else if (file_search_len < 30) {
+                char letter=plain_keys[key];
+                if (shift_keys[key] && shift_down) letter=shift_keys[key];
+                if (letter && !control_down && !alt_down) { file_search[file_search_len++]=letter; file_search[file_search_len]=0; }
+            }
+            dirty=1; return;
+        }
+        if (key == 0x1c) { files_open_selected(); return; }
+        if (key == 0x48 || key == 0x50) {
+            int pos=0, shown=files_visible_count();
+            for (int i=0;i<shown;i++) if (files_item(i)==selected_file) pos=i;
+            pos += key == 0x48 ? -1 : 1;
+            if (pos < 0) pos=0;
+            if (pos >= shown) pos=shown-1;
+            if (pos >= 0) selected_file=files_item(pos);
+            dirty=1; return;
+        }
+    }
+    if (app == APPEAR) {
+        if (control_down && key == 0x21) { settings_search_focus=1; dirty=1; return; }
+        if (settings_search_focus) {
+            if (key == 0x0e && settings_search_len) settings_search[--settings_search_len]=0;
+            else if (key == 0x1c) { settings_search_apply(); return; }
+            else if (settings_search_len < 30) {
+                char letter=plain_keys[key];
+                if (shift_keys[key] && shift_down) letter=shift_keys[key];
+                if (letter && !control_down && !alt_down) { settings_search[settings_search_len++]=letter; settings_search[settings_search_len]=0; }
+            }
+            dirty=1; return;
+        }
+    }
     if (app != NOTES && app != CONSOLE && app != CALC) return;
     char ch = plain_keys[key];
     if (shift_keys[key] && shift_down) ch = shift_keys[key];
@@ -3096,12 +3306,12 @@ void kmain(void) {
         }
     }
     notes_len = size(notes);
-    log_write("Cinmix kernel 0.16  [i386]");
+    log_write("Cinmix kernel 0.17  [i386]");
     log_write("RAM volume mounted at R:");
     init_mouse();
     init_frame_clock();
     refresh_clock();
-    notify("Cinmix 0.16 is ready");
+    notify("Cinmix 0.17 is ready");
     repaint();
     uint32_t cycles = 0;
     for (;;) {

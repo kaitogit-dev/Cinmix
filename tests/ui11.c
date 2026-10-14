@@ -82,7 +82,7 @@ int main(void) {
     require(!quick_open);
     open_window(APPEAR);
     frames(9);
-    click(windows[APPEAR].x+2+120+2*62+14,windows[APPEAR].y+34+397+10);
+    click(windows[APPEAR].x+2+164+34+155+2*65+20,windows[APPEAR].y+34+370+10);
     require(accent_index == 2);
     frames(2);
     snap("build/accent.ppm");

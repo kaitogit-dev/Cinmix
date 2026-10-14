@@ -1,37 +1,27 @@
-# Cinmix 0.16 — Explorer + Desktop Hover
+# Cinmix 0.17 — Windows-style Settings and Explorer controls
 
-Cinmix is a freestanding 32-bit x86 BIOS desktop operating system. It prefers a 1920×1080×32 VBE or Bochs-compatible graphics mode, with lower-resolution fallbacks. The interface combines Aero-style glass, rounded antialiased edges, a centered icon-only taskbar, and animated application windows.
+Cinmix is a freestanding, 32-bit i386 desktop OS booting from a legacy BIOS El Torito CD image, targeting **1920×1080** with a Windows 7 Aero and Windows 11-inspired appearance.
 
-## What is new in 0.16
+## New in 0.17
 
-**Dark Aero** is a complete fourth color scheme alongside Aero, Silver and Midnight. It introduces a dark-blue translucent wallpaper, navy title bars and window content, glass panels, dark text fields and buttons, and high-contrast light text throughout Files, Notes, System, Calculator, Appearance, Start, Run, Quick Panel, Notification Center, Alt+Tab and taskbar tooltips. Dark Aero uses the existing configurable accent colors and glass strength. Switching back restores the last selected light theme rather than resetting other appearance preferences.
+- **Windows 11–inspired Settings app:** The old Appearance window is now Settings. It has a sidebar with **System**, **Personalization**, **Apps**, **Notifications**, and **About** pages. Choose light or Dark Aero, select themes, wallpapers, glass strength and accent colors; control software volume and Quiet mode; clear notification history; view display and storage information; or open installed apps directly from Settings.
+- **Settings search:** Click the search field, enter a setting category such as `theme`, `display`, `volume`, `apps`, `quiet`, `wallpaper`, or `about`, and press Enter. `Ctrl+F` focuses search while Settings is active.
+- **File Explorer controls work:** **New** creates one of three temporary RAM documents. **Sort** reverses the file order; **View** switches between details and a taller list layout; **...** shows or hides the details pane. The left navigation filters files by virtual category. The breadcrumb returns to RAM. Search supports keyboard input, backspace, and Escape; `Ctrl+F` focuses it. Click a row to select, use Up/Down to move selection, or press Enter to open a supported item in Notes, Settings or Calendar.
+- **Responsive Settings layout:** Compact spacing keeps Personalization controls reachable in 1280×720 windows as well as the preferred 1920×1080 mode.
+- **Preserved:** Dark Aero, mouse cursor, desktop icon hover highlights, taskbar previews and running highlights, animated windows and panels, Notification Center, Run, sketching and other built-in apps.
 
-**Dark Aero controls:**
+## Current storage limitations
 
-- In Appearance, click the **Dark Aero** button at the top right of Color Scheme.
-- In the Quick Panel (click the clock), click **Dark Aero: On/Off**.
-- Right-click an empty desktop area and choose **Toggle Dark Aero**.
-- Press **Ctrl+Alt+M** at any time to toggle Dark Aero.
-- Type **dark** or **light** in Run (`Ctrl+R`) or Console.
+Explorer is an **in-memory virtual RAM browser**, not yet a driver-backed NTFS/FAT filesystem. Its preloaded entries are demonstrations and new RAM documents disappear after reboot. The Notes app remains a volatile text editor, and audio volume is a software UI value without an audio device driver. Display resolution is selected by compatible firmware at boot rather than dynamically in Settings.
 
-**Quiet mode / Do Not Disturb:** The Quick Panel now includes **Quiet: On/Off**. New notifications are still saved in the Notification Center but do not create unread badges while quiet mode is enabled. Existing notifications can still be read and dismissed normally. Quiet mode can also be toggled with `quiet` in Run or Console.
+## Build and test
 
-**New window shortcuts:** **Ctrl+Alt+Up** maximizes or restores the active window, and **Ctrl+Alt+Down** minimizes it with the existing closing tween. Existing left/right snapping shortcuts remain unchanged.
-
-**Render optimization:** Wallpaper caching now distinguishes light and dark appearances without regenerating a full-HD wallpaper when switching between light themes. The renderer preserves partially redrawn window and panel regions and the cursor compositing fixes from previous versions.
-
-## Existing desktop features
-
-Ten built-in apps, searchable Start menu, desktop right-click menu, reversible window/panel tweens, dragging, resizing, snapping, minimize and restore, animated Show Desktop, running and hovered taskbar highlights, delayed taskbar tooltips, notification management, quick volume UI, wallpapers, glass strength and accent selection, Run dialog, visual Alt+Tab, and keyboard desktop icon selection.
-
-## Build and verification
-
-On a Linux system with GCC, GNU binutils, Python 3 and 32-bit cross-compilation support:
+On Linux with GCC (including `-m32` support), GNU binutils and Python 3:
 
 ```sh
 make verify
 ```
 
-This creates `Cinmix-0.16.iso`. Tests validate ISO9660 and El Torito structures, BIOS video mode selection, panel and window controls, 1920×1080 framebuffer composition, both color modes, theme input controls, the Windows 11 style Explorer shell and desktop hover highlights. The tests run against the native software compositor and simulated input; they **do not establish actual boot or frame-rate smoothness in a BIOS emulator**. The emulator must provide a suitable 1080p framebuffer mode or Cinmix falls back to a supported resolution. At least 128 MB of RAM is recommended. Preferences remain in RAM and reset when Cinmix reboots.
+This builds `Cinmix-0.17.iso`, checks ISO9660/El Torito structure and the 56-sector kernel bootloader, and executes **13 native test suites**, including a real-mouse-packet test of Explorer and Settings at 1920×1080. The larger bootloader image supports up to 112 KiB of kernel code, instead of the previous 96 KiB limit. Native tests and ISO structure checks **do not prove successful boot or smooth performance in a BIOS emulator**. Full BIOS emulator execution still needs to be confirmed in your environment.
 
-Software volume controls are interface state only; an audio device driver has not been implemented. Font licensing information is in `FONT-LICENSE.txt`.
+All Cinmix preferences and RAM file entries reset on reboot. Font licensing information is in `FONT-LICENSE.txt`.
