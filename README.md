@@ -1,27 +1,38 @@
-# Cinmix 0.11.3
+# Cinmix 0.12
 
-Cinmix is a freestanding 32-bit x86 desktop OS booting from a legacy BIOS El Torito ISO. The UI targets 1280 x 720 and combines Aero-style glass with a centered icon-only taskbar.
+Cinmix is a freestanding 32-bit x86 desktop operating system designed for a legacy BIOS El Torito CD image at 1280 x 720. Its desktop combines Aero-style glass, a centered icon-only taskbar, anti-aliased edges, and animated windows.
 
-## What's included
+## New in 0.12
 
-Ten desktop apps, a searchable Start menu, draggable and resizable windows, maximize/restore, minimize/close, window snapping, tweened transitions, notification and quick panels, live taskbar previews, desktop context menus, themes, wallpaper and accent controls, and anti-aliased rounded edges.
+- Removed translucent backing boxes from desktop shortcut icons and taskbar app icons. Individual icon artwork is drawn directly on the desktop or taskbar, without a generic plate.
+- Kept small underlines for active/running taskbar apps, and replaced the boxed hover effect with a discreet line.
+- Added a centered Alt+Tab switcher showing open application icons. Hold Alt, press Tab repeatedly to select the next app, use Shift+Alt+Tab to cycle backwards, and release Alt to activate the selection. Press Escape to cancel.
+- Added keyboard-accessible desktop shortcuts: Ctrl+Alt+D enters or leaves desktop shortcut focus. Use arrow keys to select one of eight shortcuts, Enter to launch, or Escape to cancel. Focus is marked by a small underline rather than a tile.
+- Retained working close/minimize/maximize controls, tweened window animations, window snapping and resizing, taskbar previews, Notification Center, Quick Panel, customizable appearance, and all ten applications.
 
-## 0.11.3 repair
+## Keyboard shortcuts
 
-- Replaced the emulator-sensitive PC-speaker animation pulse with a polled PIT channel 0 counter and a fallback when timer samples stop changing.
-- Window controls accept clicks at both the visible tweened position and the final position. Minimize, restore and close transitions preserve their state.
-- Animation-only frames use damaged regions rather than forcing a full-screen repaint. Idle windows no longer redraw unnecessarily.
-- Preserved the compositor cursor correction, existing apps, notifications, appearance controls and anti-aliased corners.
-- Added PS/2 mouse-packet regression coverage for minimize, restore, close and maximize.
+| Keys | Action |
+|---|---|
+| Alt+Tab | Preview and switch open windows; release Alt to commit |
+| Shift+Alt+Tab | Cycle backwards through open windows |
+| Escape | Cancel switcher, desktop selection, or panels |
+| Ctrl+Alt+D | Toggle desktop shortcut keyboard focus |
+| Arrows, Enter | Select and open a focused desktop shortcut |
+| Ctrl+1 through Ctrl+7 | Launch pinned apps |
+| Alt+F4 | Close active app |
+| Alt+D | Show or restore desktop |
+| Ctrl+Alt+N | Toggle Notification Center |
+| Ctrl+Alt+Left / Right | Snap active window |
 
-## Build and test
+## Build and verification
 
-On Linux with GCC, GNU binutils, Python 3 and an i386-capable GCC toolchain:
+Use Linux with GCC, GNU binutils, Python 3 and 32-bit compilation support.
 
 ```sh
 make verify
 ```
 
-The output is `Cinmix-0.11.3.iso`. `make verify` checks the ISO boot structure and runs native UI/compositor regression tests. These native tests do not replace a full BIOS-emulator boot test; runtime performance and input behavior in v86 or QEMU should still be confirmed on the intended emulator.
+The build produces `Cinmix-0.12.iso`. Tests validate ISO and boot structures, window controls through simulated PS/2 mouse packets, existing desktop behavior, compositor updates, and new 0.12 keyboard/icon interactions. Native tests and static ISO checks are **not** a substitute for full BIOS emulator testing. Visual smoothness and runtime performance must be verified in your emulator.
 
-The volume control is a software UI state, not an audio device driver. Font licensing information is in `FONT-LICENSE.txt`.
+Software volume controls do not yet output audio through a hardware driver. Font licensing is in `FONT-LICENSE.txt`.

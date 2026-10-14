@@ -1,3 +1,2 @@
-Cinmix 0.11.3 | BIOS i386 | 1280x720
-Smoothness patch: no cursor erasure during window redraws, 60Hz-paced UI animation, fewer redundant damage repaints and lightweight glass blur.
-4-sample rounded edge anti-aliasing retained, along with Notification Center, Quick Panel, previews and all existing apps.
+Cinmix 0.12 | BIOS i386 | 1280x720
+Desktop and taskbar icons no longer have generic backing tiles. Active apps are indicated by clean underlines. Alt+Tab now opens a visual app switcher; release Alt to switch. Ctrl+Alt+D focuses desktop shortcuts for arrow-key navigation and Enter to launch. Existing animations, glass styling, panels and apps are preserved.

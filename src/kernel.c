@@ -114,6 +114,14 @@ static int drag_dy;
 static int start_open;
 static int next_order;
 static int task_hover = -1;
+static int desktop_focus = -1;
+static int last_desktop_focus = -1;
+static int tab_active;
+static int tab_apps[APPS];
+static int tab_count;
+static int tab_selected;
+static int last_tab_active;
+static int last_tab_selected;
 static int context_open;
 static int context_x;
 static int context_y;
@@ -630,8 +638,6 @@ static void draw_mark(int x, int y, uint32_t color) {
 }
 
 static void draw_icon(int x, int y, int id) {
-    rounded(x, y, 40, 40, 7, 0xeaf3fc);
-    rect(x + 5, y + 5, 30, 1, 0xffffff);
     if (id == FILES) {
         rect(x + 9, y + 12, 23, 17, 0xe6bc7d);
         rect(x + 9, y + 9, 10, 6, 0xe6bc7d);
@@ -856,11 +862,11 @@ static void draw_desktop(void) {
         desktop_position(k, &x, &y);
         if (y + 72 >= sh - 52) continue;
         int id = desk_shortcuts[k];
-        glass(x + 18, y + 2, 48, 47, 0xffffff, 12);
         draw_icon(x + 22, y + 4, id);
         int tw = size(app_name[id]) * 8;
         text(x + 43 - tw / 2 + 1, y + 56, app_name[id], 0x162746);
         text(x + 43 - tw / 2, y + 55, app_name[id], WHITE);
+        if (desktop_focus == k) rounded(x + 23, y + 74, 40, 3, 1, 0xbdefff);
     }
     if (sw >= 600 && sh >= 480) {
         text(sw - 148, sh - 105, "cinmix", 0xd5eeff);
@@ -880,19 +886,8 @@ static void draw_desktop(void) {
         int x = left + n * taskbar_step();
         int active = active_window() == id && !windows[id].minimized;
         int running = windows[id].opened;
-        if (active) {
-            round_capture(x, sh - 47, taskbar_width(), 41, 9);
-            glass_button(x, sh - 47, taskbar_width(), 41, 0x81caef, 91);
-            glass(x + 5, sh - 45, 36, 13, 0xe5f8ff, 33);
-            round_finish(x, sh - 47, taskbar_width(), 41, 9);
-        } else if (task_hover == id) {
-            round_capture(x, sh - 47, taskbar_width(), 41, 9);
-            glass_button(x, sh - 47, taskbar_width(), 41, 0xb0daef, 57);
-            round_finish(x, sh - 47, taskbar_width(), 41, 9);
-        } else {
-            glass(x + 2, sh - 44, taskbar_width() - 4, 36, 0xd0e9fa, 13);
-        }
         draw_task_icon(x + 7, sh - 41, id);
+        if (task_hover == id && !active) rounded(x + 15, sh - 8, 16, 2, 1, 0x9bddfb);
         if (running) {
             if (active) {
                 rounded(x + 10, sh - 6, 26, 3, 1, 0xc5f5ff);
@@ -964,7 +959,7 @@ static void execute_command(void) {
     log_write(linebuf);
     if (!console_len) return;
     if (same(console_input, "help")) print_info();
-    else if (same(console_input, "ver")) log_write("Cinmix 0.11  |  kernel 0.11  |  i386");
+    else if (same(console_input, "ver")) log_write("Cinmix 0.12  |  kernel 0.12  |  i386");
     else if (same(console_input, "clear")) log_count = 0;
     else if (same(console_input, "context")) log_write("Right click on desktop");
     else if (same(console_input, "resize")) log_write("Drag window lower-right corner");
@@ -974,7 +969,7 @@ static void execute_command(void) {
         log_write("/ram/readme.txt");
         log_write("/ram/boot.log");
         log_write("/ram/notes.txt");
-    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix kernel 0.11; El Torito; RAM volume");
+    } else if (same(console_input, "cat readme.txt")) log_write("Cinmix kernel 0.12; El Torito; RAM volume");
     else if (same(console_input, "cat boot.log")) log_write("El Torito -> kernel -> protected mode -> UI");
     else if (same(console_input, "cat notes.txt")) {
         char one[72] = "";
@@ -1108,6 +1103,7 @@ static void toggle_desktop(void) {
 }
 
 static void open_window(int app) {
+    desktop_focus = -1;
     desktop_hidden = 0;
     int first = !windows[app].opened || windows[app].minimized;
     int reversing = first && anim_ticks[app] > 0 && anim_exit[app] && anim_visible[app];
@@ -1231,7 +1227,7 @@ static void window_content(int app, const Window *w) {
         rect(x + 137, yy, cw - 150, 1, HAIR);
         text(x + 146, yy + 11, "PREVIEW", STEEL);
         if (selected_file == 0) {
-            text(x + 146, yy + 36, "Cinmix 0.11", INK);
+            text(x + 146, yy + 36, "Cinmix 0.12", INK);
             text(x + 146, yy + 57, "i386 / El Torito CD", STEEL);
         } else if (selected_file == 1) {
             text(x + 146, yy + 36, "Protected mode", INK);
@@ -1288,10 +1284,10 @@ static void window_content(int app, const Window *w) {
     } else if (app == SYSTEM) {
         rect(x, y, cw, 4, BLUE);
         big_text(x + 21, y + 22, "CINMIX", INK);
-        text(x + 24, y + 62, "RELEASE 0.11", STEEL);
+        text(x + 24, y + 62, "RELEASE 0.12", STEEL);
         rect(x + 21, y + 91, cw - 42, 1, HAIR);
         text(x + 24, y + 106, "Kernel", STEEL);
-        text(x + 166, y + 106, "Cinmix 0.11.0", INK);
+        text(x + 166, y + 106, "Cinmix 0.12", INK);
         text(x + 24, y + 134, "Target", STEEL);
         text(x + 166, y + 134, "i386 protected", INK);
         text(x + 24, y + 162, "Firmware", STEEL);
@@ -1706,6 +1702,71 @@ static void draw_tooltip(void) {
     round_finish(x, y, w, h, 12);
 }
 
+static int switcher_left(void) { return (sw - 450) / 2; }
+static int switcher_top(void) { return (sh - (tab_count > 5 ? 238 : 154)) / 2; }
+static int switcher_height(void) { return tab_count > 5 ? 238 : 154; }
+
+static void draw_switcher(void) {
+    if (!tab_active || tab_count < 2) return;
+    int x = switcher_left(), y = switcher_top();
+    int h = switcher_height();
+    soft_shadow(x, y, 450, h, 17, 6);
+    round_capture(x, y, 450, h, 16);
+    glass_frame(x, y, 450, h, 0x152c47, 230);
+    rounded(x + 2, y + 2, 446, h - 4, 14, 0x183451);
+    text(x + 21, y + 15, "Switch windows", WHITE);
+    text(x + 239, y + 15, "Release Alt to switch", 0xb7d5e9);
+    for (int i = 0; i < tab_count; i++) {
+        int cx = x + 22 + (i % 5) * 85;
+        int cy = y + 46 + (i / 5) * 83;
+        if (i == tab_selected) {
+            rounded(cx - 6, cy - 5, 73, 72, 10, 0x376d98);
+            outline(cx - 6, cy - 5, 73, 72, 0x8bcef4);
+        }
+        draw_task_icon(cx + 14, cy + 1, tab_apps[i]);
+        int len = size(app_name[tab_apps[i]]) * 8;
+        if (len > 77) len = 77;
+        text(cx + 30 - len / 2, cy + 41, app_name[tab_apps[i]], WHITE);
+        if (windows[tab_apps[i]].minimized) rounded(cx + 25, cy + 60, 10, 2, 1, 0x95b2c7);
+    }
+    round_finish(x, y, 450, h, 16);
+}
+
+static void start_or_cycle_switcher(void) {
+    if (!tab_active) {
+        tab_count = 0;
+        int used[APPS] = {0};
+        for (int n = 0; n < APPS; n++) {
+            int best = -1;
+            for (int i = 0; i < APPS; i++) {
+                if (!used[i] && windows[i].opened && (best < 0 || windows[i].order > windows[best].order)) best = i;
+            }
+            if (best < 0) break;
+            used[best] = 1;
+            tab_apps[tab_count++] = best;
+        }
+        if (tab_count < 2) return;
+        tab_active = 1;
+        tab_selected = shift_down ? tab_count - 1 : 1;
+        start_open = 0;
+        quick_open = 0;
+        context_open = 0;
+        notification_open = 0;
+    } else {
+        tab_selected = (tab_selected + (shift_down ? tab_count - 1 : 1)) % tab_count;
+    }
+    dirty = 1;
+}
+
+static void finish_switcher(int commit) {
+    if (!tab_active) return;
+    int chosen = tab_apps[tab_selected];
+    tab_active = 0;
+    tab_count = 0;
+    dirty = 1;
+    if (commit && windows[chosen].opened) open_window(chosen);
+}
+
 static void draw_pointer(void) {
     pointer_old_x = mouse_x;
     pointer_old_y = mouse_y;
@@ -1860,7 +1921,8 @@ static void draw_scene(void) {
     draw_context();
     draw_quick();
     draw_notifications();
-    draw_tooltip();
+    if (tab_active) draw_switcher();
+    else draw_tooltip();
 }
 
 static void repaint(void) {
@@ -1928,6 +1990,19 @@ static void repaint(void) {
         if (!start_open && !context_open && !quick_open && !notification_open) add_tooltip_damage(task_hover, mouse_x, task_hover >= 0 && windows[task_hover].opened && !windows[task_hover].minimized);
         add_preview_damage(last_snap_side);
         add_preview_damage(snap_preview_side());
+        if (desktop_focus != last_desktop_focus) {
+            if (last_desktop_focus >= 0) {
+                int x, y; desktop_position(last_desktop_focus, &x, &y);
+                add_damage(x, y, 90, 84);
+            }
+            if (desktop_focus >= 0) {
+                int x, y; desktop_position(desktop_focus, &x, &y);
+                add_damage(x, y, 90, 84);
+            }
+        }
+        if (tab_active || last_tab_active) {
+            add_damage((sw - 450) / 2 - 24, (sh - 238) / 2 - 24, 498, 286);
+        }
         add_damage(pointer_old_x, pointer_old_y, 12, 18);
         add_damage(mouse_x, mouse_y, 12, 18);
     }
@@ -1966,6 +2041,9 @@ static void repaint(void) {
     last_hover_x = mouse_x;
     last_hover_running = task_hover >= 0 && windows[task_hover].opened && !windows[task_hover].minimized;
     last_active = active_window();
+    last_desktop_focus = desktop_focus;
+    last_tab_active = tab_active;
+    last_tab_selected = tab_selected;
     last_snap_side = snap_preview_side();
     frame_theme = theme;
     frame_accent = accent_index;
@@ -2013,6 +2091,8 @@ static void sketch_paint(int px, int py) {
 }
 
 static void handle_click(void) {
+    if (tab_active) { finish_switcher(0); return; }
+    if (desktop_focus >= 0) { desktop_focus = -1; dirty = 1; }
     if (notification_open) {
         int nx = notification_left(), ny = notification_top();
         if (inside(mouse_x, mouse_y, nx, ny, notification_width(), notification_height())) {
@@ -2237,6 +2317,8 @@ static void handle_click(void) {
 }
 
 static void handle_right_click(void) {
+    if (tab_active) finish_switcher(0);
+    desktop_focus = -1;
     context_open = 0;
     start_open = 0;
     quick_open = 0;
@@ -2331,9 +2413,40 @@ static void handle_key(uint8_t code) {
     uint8_t key = code & 0x7f;
     if (key == 0x2a || key == 0x36) { shift_down = !released; return; }
     if (key == 0x1d) { control_down = !released; return; }
-    if (key == 0x38) { alt_down = !released; return; }
+    if (key == 0x38) {
+        alt_down = !released;
+        if (released) finish_switcher(1);
+        return;
+    }
     if (released) return;
-    if (key == 0x01) { start_open = 0; context_open = 0; quick_open = 0; notification_open = 0; menu_query_len = 0; menu_query[0] = 0; dirty = 1; return; }
+    if (key == 0x01) {
+        finish_switcher(0);
+        desktop_focus = -1;
+        start_open = 0; context_open = 0; quick_open = 0; notification_open = 0;
+        menu_query_len = 0; menu_query[0] = 0; dirty = 1; return;
+    }
+    if (alt_down && key == 0x0f) { start_or_cycle_switcher(); return; }
+    if (tab_active) return;
+    if (control_down && alt_down && key == 0x20) {
+        desktop_focus = desktop_focus < 0 ? 0 : -1;
+        start_open = 0; context_open = 0; quick_open = 0; notification_open = 0;
+        dirty = 1; return;
+    }
+    if (desktop_focus >= 0) {
+        if (key == 0x1c) {
+            int app = desk_shortcuts[desktop_focus];
+            desktop_focus = -1;
+            open_window(app);
+            return;
+        }
+        int next = desktop_focus;
+        if (key == 0x48 && next % 4 > 0) next--;
+        if (key == 0x50 && next % 4 < 3) next++;
+        if (key == 0x4b && next >= 4) next -= 4;
+        if (key == 0x4d && next < 4) next += 4;
+        if (next != desktop_focus) { desktop_focus = next; dirty = 1; }
+        return;
+    }
     if (key == 0x3b) { context_open = 0; quick_open = 0; notification_open = 0; start_open = !start_open; if (start_open) start_anim = 8; menu_query_len = 0; menu_query[0] = 0; dirty = 1; return; }
     if (context_open) { context_open = 0; dirty = 1; return; }
     if (quick_open) { quick_open = 0; dirty = 1; return; }
@@ -2369,19 +2482,6 @@ static void handle_key(uint8_t code) {
         return;
     }
     if (key == 0x57) { int a = active_window(); if (a >= 0) toggle_maximize(a); return; }
-    if (alt_down && key == 0x0f) {
-        int current = active_window();
-        int next = -1;
-        int next_order_value = 0x7fffffff;
-        for (int i = 0; i < APPS; i++) {
-            if (windows[i].opened && i != current && windows[i].order < next_order_value) {
-                next_order_value = windows[i].order;
-                next = i;
-            }
-        }
-        if (next >= 0) open_window(next);
-        return;
-    }
     if (alt_down && key == 0x3e) {
         int a = active_window();
         if (a >= 0) close_window(a, 0);
@@ -2539,12 +2639,12 @@ void kmain(void) {
         }
     }
     notes_len = size(notes);
-    log_write("Cinmix kernel 0.11.3  [i386]");
+    log_write("Cinmix kernel 0.12  [i386]");
     log_write("RAM volume mounted at R:");
     init_mouse();
     init_frame_clock();
     refresh_clock();
-    notify("Cinmix 0.11.3 is ready");
+    notify("Cinmix 0.12 is ready");
     repaint();
     uint32_t cycles = 0;
     for (;;) {
