@@ -5,7 +5,7 @@ OBJCOPY = objcopy
 CFLAGS = -m32 -std=c11 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -fno-builtin -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -O2 -Wall -Wextra -Werror
 LDFLAGS = -m elf_i386 -T src/link.ld -nostdlib --build-id=none
 
-all: Cinmix-0.11.iso
+all: Cinmix-0.11.1.iso
 
 build:
 	mkdir -p build
@@ -32,10 +32,10 @@ build/kernel.bin: build/kernel.elf
 	$(OBJCOPY) -O binary $< $@
 	@test $$(stat -c%s $@) -le 98304 || (echo 'Kernel exceeds CD loader capacity' && exit 1)
 
-Cinmix-0.11.iso: build/cdboot.bin build/kernel.bin README.txt tools/iso.py
+Cinmix-0.11.1.iso: build/cdboot.bin build/kernel.bin README.txt tools/iso.py
 	python3 tools/iso.py build/cdboot.bin build/kernel.bin README.txt $@
 
-verify: Cinmix-0.11.iso
+verify: Cinmix-0.11.1.iso
 	python3 tools/verify.py $< build/cdboot.bin build/kernel.bin build/kernel.elf
 	$(MAKE) smoke
 
@@ -50,6 +50,6 @@ bench: | build
 	./build/bench
 
 clean:
-	rm -rf build Cinmix-0.11.iso
+	rm -rf build Cinmix-0.11.1.iso
 
 .PHONY: all verify smoke bench clean

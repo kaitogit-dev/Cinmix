@@ -79,6 +79,20 @@ static uint32_t shadow_pixels;
 static uint32_t desktop_regenerations;
 static uint32_t full_frames;
 static uint32_t pointer_frames;
+static uint32_t damage_frames;
+static uint32_t presented_pixels;
+static int frame_valid;
+static int frame_theme = -1, frame_accent = -1, frame_glass = -1, frame_wallpaper = -1;
+typedef struct { int x, y, w, h; } DamageRect;
+static DamageRect damage[32];
+static int damage_count;
+static DamageRect last_window_rect[APPS];
+static uint8_t last_window_visible[APPS];
+static int last_window_order[APPS];
+static int last_active = -1;
+static int last_start, last_quick, last_context, last_notification, last_hover = -1;
+static int last_hover_x, last_hover_running;
+static int last_context_x, last_context_y, last_snap_side;
 static uint32_t round_back[4][18][18];
 static int sw;
 static int sh;
@@ -396,8 +410,8 @@ static void blur_region(int x, int y, int w, int h) {
     for (int yy = y0; yy < y1; yy++)
         for (int xx = x0; xx < x1; xx++)
             blur_canvas[(size_t)yy * sw + xx] = canvas[(size_t)yy * sw + xx];
-    for (int yy = y > 0 ? y : 0; yy < y + h && yy < sh; yy++) {
-        for (int xx = x > 0 ? x : 0; xx < x + w && xx < sw; xx++) {
+    for (int yy = y > clip_top ? y : clip_top; yy < y + h && yy < clip_bottom; yy++) {
+        for (int xx = x > clip_left ? x : clip_left; xx < x + w && xx < clip_right; xx++) {
             uint32_t r = 0, g = 0, b = 0;
             for (int dy = -3; dy <= 3; dy += 3) {
                 int sy = yy + dy;
@@ -419,17 +433,34 @@ static void blur_region(int x, int y, int w, int h) {
     }
 }
 
+static void smooth_pixel(int x, int y, uint32_t color, int coverage) {
+    if (coverage <= 0 || x < clip_left || x >= clip_right || y < clip_top || y >= clip_bottom ||
+        (unsigned)x >= (unsigned)sw || (unsigned)y >= (unsigned)sh) return;
+    uint32_t *dst = canvas + (size_t)y * sw + x;
+    *dst = coverage >= 256 ? color : blend(*dst, color, coverage);
+}
+
 static void rounded(int x, int y, int w, int h, int radius, uint32_t color) {
-    if (radius < 2 || w < radius * 2 || h < radius * 2) { rect(x,y,w,h,color); return; }
-    rect(x + radius, y, w - 2 * radius, h, color);
-    rect(x, y + radius, radius, h - 2 * radius, color);
-    rect(x + w - radius, y + radius, radius, h - 2 * radius, color);
+    if (w <= 0 || h <= 0) return;
+    if (radius < 2 || w < radius * 2 || h < radius * 2) { rect(x, y, w, h, color); return; }
+    rect(x + radius, y, w - radius * 2, h, color);
+    rect(x, y + radius, radius, h - radius * 2, color);
+    rect(x + w - radius, y + radius, radius, h - radius * 2, color);
     for (int row = 0; row < radius; row++) {
-        int d = radius - row;
-        int inset = 0;
-        while (inset < radius && (radius - inset) * (radius - inset) + d * d > radius * radius) inset++;
-        rect(x + inset, y + row, w - 2 * inset, 1, color);
-        rect(x + inset, y + h - 1 - row, w - 2 * inset, 1, color);
+        for (int col = 0; col < radius; col++) {
+            int coverage = 0;
+            for (int a = 1; a <= 3; a += 2)
+                for (int b = 1; b <= 3; b += 2) {
+                    int dx = radius * 4 - (col * 4 + a);
+                    int dy = radius * 4 - (row * 4 + b);
+                    if (dx * dx + dy * dy <= radius * radius * 16) coverage += 64;
+                }
+            if (!coverage) continue;
+            smooth_pixel(x + col, y + row, color, coverage);
+            smooth_pixel(x + w - 1 - col, y + row, color, coverage);
+            smooth_pixel(x + col, y + h - 1 - row, color, coverage);
+            smooth_pixel(x + w - 1 - col, y + h - 1 - row, color, coverage);
+        }
     }
 }
 
@@ -449,7 +480,7 @@ static void round_finish(int x, int y, int w, int h, int r) {
             for (int xx = 0; xx < r; xx++) {
                 int px = x + ((c & 1) ? w - r : 0) + xx;
                 int py = y + ((c & 2) ? h - r : 0) + yy;
-                if ((unsigned)px >= (unsigned)sw || (unsigned)py >= (unsigned)sh) continue;
+                if ((unsigned)px >= (unsigned)sw || (unsigned)py >= (unsigned)sh || px < clip_left || px >= clip_right || py < clip_top || py >= clip_bottom) continue;
                 int sx = (c & 1) ? r - 1 - xx : xx;
                 int sy = (c & 2) ? r - 1 - yy : yy;
                 int coverage = 0;
@@ -468,10 +499,23 @@ static void round_finish(int x, int y, int w, int h, int r) {
 static void outline(int x, int y, int w, int h, uint32_t color);
 
 static void circle(int cx, int cy, int radius, uint32_t color) {
-    for (int y = -radius; y <= radius; y++) {
-        int wide = 0;
-        while ((wide + 1) * (wide + 1) + y * y <= radius * radius) wide++;
-        rect(cx - wide, cy + y, 2 * wide + 1, 1, color);
+    if (radius <= 0) return;
+    int rr = radius * radius * 16;
+    for (int yy = -radius; yy <= radius; yy++) {
+        for (int xx = -radius; xx <= radius; xx++) {
+            int coverage = 0;
+            for (int sy = -1; sy <= 1; sy += 2)
+                for (int sx = -1; sx <= 1; sx += 2) {
+                    int dx = xx * 4 + sx;
+                    int dy = yy * 4 + sy;
+                    if (dx * dx + dy * dy <= rr) coverage += 64;
+                }
+            int px = cx + xx, py = cy + yy;
+            if (!coverage || px < clip_left || px >= clip_right || py < clip_top || py >= clip_bottom) continue;
+            if ((unsigned)px >= (unsigned)sw || (unsigned)py >= (unsigned)sh) continue;
+            uint32_t *dest = canvas + (size_t)py * sw + px;
+            *dest = coverage == 256 ? color : blend(*dest, color, coverage);
+        }
     }
 }
 
@@ -550,17 +594,20 @@ static void big_text(int x, int y, const char *value, uint32_t color) {
 }
 
 static void line(int x1, int y1, int x2, int y2, uint32_t color) {
-    int dx = x2 > x1 ? x2 - x1 : x1 - x2;
-    int dy = y2 > y1 ? y2 - y1 : y1 - y2;
-    int sx = x1 < x2 ? 1 : -1;
-    int sy = y1 < y2 ? 1 : -1;
-    int err = dx - dy;
-    for (;;) {
-        pixel(x1, y1, color);
-        if (x1 == x2 && y1 == y2) break;
-        int e = err * 2;
-        if (e > -dy) { err -= dy; x1 += sx; }
-        if (e < dx) { err += dx; y1 += sy; }
+    int ax = x2 - x1, ay = y2 - y1;
+    int steep = (ay < 0 ? -ay : ay) > (ax < 0 ? -ax : ax);
+    if (steep) { int t=x1; x1=y1; y1=t; t=x2; x2=y2; y2=t; }
+    if (x1 > x2) { int t=x1; x1=x2; x2=t; t=y1; y1=y2; y2=t; }
+    int dx=x2-x1;
+    if (!dx) { if (steep) pixel(y1,x1,color); else pixel(x1,y1,color); return; }
+    int step=((y2-y1)*256)/dx;
+    int fy=y1*256;
+    for (int x=x1; x<=x2; x++) {
+        int y=fy>>8;
+        int weight=fy-(y<<8);
+        if (steep) { smooth_pixel(y,x,color,256-weight); smooth_pixel(y+1,x,color,weight); }
+        else { smooth_pixel(x,y,color,256-weight); smooth_pixel(x,y+1,color,weight); }
+        fy+=step;
     }
 }
 
@@ -780,12 +827,17 @@ static void regenerate_wallpaper(void) {
 
 static void draw_wallpaper(void) {
     if (cached_wallpaper != wallpaper) {
+        int old_l = clip_left, old_t = clip_top, old_r = clip_right, old_b = clip_bottom;
+        clip_full();
         regenerate_wallpaper();
         for (size_t k = 0; k < (size_t)sw * sh; k++) desktop_cache[k] = canvas[k];
+        clip_left = old_l; clip_top = old_t; clip_right = old_r; clip_bottom = old_b;
         cached_wallpaper = wallpaper;
         desktop_regenerations++;
-    } else {
-        for (size_t k = 0; k < (size_t)sw * sh; k++) canvas[k] = desktop_cache[k];
+    }
+    for (int y = clip_top; y < clip_bottom; y++) {
+        size_t offset = (size_t)y * sw + clip_left;
+        for (int x = clip_left; x < clip_right; x++) canvas[offset++] = desktop_cache[(size_t)y * sw + x];
     }
 }
 
@@ -1135,10 +1187,15 @@ static void window_content(int app, const Window *w) {
     int cw = w->w - 4;
     int ch = w->h - 36;
     if (cw < 1 || ch < 1) return;
-    clip_left = x;
-    clip_top = y;
-    clip_right = x + cw;
-    clip_bottom = y + ch;
+    int old_l = clip_left, old_t = clip_top, old_r = clip_right, old_b = clip_bottom;
+    if (clip_left < x) clip_left = x;
+    if (clip_top < y) clip_top = y;
+    if (clip_right > x + cw) clip_right = x + cw;
+    if (clip_bottom > y + ch) clip_bottom = y + ch;
+    if (clip_left >= clip_right || clip_top >= clip_bottom) {
+        clip_left = old_l; clip_top = old_t; clip_right = old_r; clip_bottom = old_b;
+        return;
+    }
     rect(x, y, cw, ch, PAPER);
     if (app == FILES) {
         rect(x, y, 122, ch, LIGHT);
@@ -1372,10 +1429,8 @@ static void window_content(int app, const Window *w) {
             glyph(px + 24, py + 11, keys[k], k % 4 == 3 ? WHITE : INK, 1);
         }
     }
-    clip_full();
-}
-
-static void draw_window(int i) {
+    clip_left = old_l; clip_top = old_t; clip_right = old_r; clip_bottom = old_b;
+}static void draw_window(int i) {
     const Window *w = &windows[i];
     if ((!w->opened || w->minimized) && !anim_visible[i]) return;
     int x, y, ww, hh;
@@ -1439,7 +1494,7 @@ static void draw_menu(void) {
     int offset = ((256 - phase) * 24) >> 8;
     my += offset;
     soft_shadow(mx, my, mw, mh, 18, 8);
-    blur_region(mx, my, mw, mh);
+    blur_region(mx, my, mw, 73);
     round_capture(mx + 8, my + 9, mw, mh, 18);
     glass(mx + 8, my + 9, mw, mh, 0x071a2d, 102);
     round_finish(mx + 8, my + 9, mw, mh, 18);
@@ -1499,7 +1554,7 @@ static void draw_context(void) {
     int w = context_width(), h = context_height();
     y += ((256 - ease(8 - context_anim, 8)) * 12) >> 8;
     soft_shadow(x, y, w, h, 14, 6);
-    blur_region(x, y, w, h);
+    blur_region(x, y, w, 56);
     round_capture(x + 5, y + 7, w, h, 15);
     glass(x + 5, y + 7, w, h, 0x05172c, 100);
     round_finish(x + 5, y + 7, w, h, 15);
@@ -1523,7 +1578,7 @@ static void draw_quick(void) {
     int y = sh - 60 - h;
     y += ((256 - ease(8 - quick_anim, 8)) * 14) >> 8;
     soft_shadow(x, y, w, h, 16, 8);
-    blur_region(x, y, w, h);
+    blur_region(x, y, w, 56);
     round_capture(x + 6, y + 8, w, h, 16);
     glass(x + 6, y + 8, w, h, 0x061528, 100);
     round_finish(x + 6, y + 8, w, h, 16);
@@ -1564,7 +1619,7 @@ static void draw_notifications(void) {
     int x = notification_left();
     int y = notification_top() + ((256 - ease(8 - notification_anim, 8)) * 20 >> 8);
     soft_shadow(x, y, w, h, 17, 8);
-    blur_region(x, y, w, h);
+    blur_region(x, y, w, 56);
     round_capture(x, y, w, h, 17);
     glass_frame(x, y, w, h, 0xb6d9ef, 205);
     glass(x + 2, y + 2, w - 4, 52, 0x1e5f93, 154);
@@ -1624,8 +1679,13 @@ static void draw_tooltip(void) {
     if (shown) {
         rounded(x + 9, y + 7, w - 18, 102, 8, 0xd1e5f1);
         for (int py = 0; py < 92; py++) {
-            uint32_t *dst = canvas + (size_t)(y + 12 + py) * sw + x + 12;
-            for (int px = 0; px < 172; px++) dst[px] = preview_buffer[py * 172 + px];
+            int yy = y + 12 + py;
+            if (yy < clip_top || yy >= clip_bottom || (unsigned)yy >= (unsigned)sh) continue;
+            for (int px = 0; px < 172; px++) {
+                int xx = x + 12 + px;
+                if (xx >= clip_left && xx < clip_right && (unsigned)xx < (unsigned)sw)
+                    canvas[(size_t)yy * sw + xx] = preview_buffer[py * 172 + px];
+            }
         }
         draw_task_icon(x + 12, y + 111, task_hover);
         text(x + 50, y + 119, app_name[task_hover], WHITE);
@@ -1656,6 +1716,7 @@ static void present_region(int x, int y, int w, int h) {
     if (x + w > sw) w = sw - x;
     if (y + h > sh) h = sh - y;
     if (w <= 0 || h <= 0) return;
+    presented_pixels += (uint32_t)(w * h);
     uint8_t *base = (uint8_t *)(uintptr_t)boot_fb;
     for (int yy = y; yy < y + h; yy++) {
         if (boot_bpp == 32) {
@@ -1696,6 +1757,7 @@ static void program_palette(void) {
 }
 
 static void present(void) {
+    presented_pixels += (uint32_t)(sw * sh);
     uint8_t *base = (uint8_t *)(uintptr_t)boot_fb;
     if (boot_bpp == 32) {
         for (int y = 0; y < sh; y++) {
@@ -1715,11 +1777,59 @@ static void present(void) {
     }
 }
 
-static void repaint(void) {
-    clip_full();
-    pointer_only = 0;
-    pointer_saved = 0;
-    full_frames++;
+static void add_damage(int x, int y, int w, int h) {
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > sw) w = sw - x;
+    if (y + h > sh) h = sh - y;
+    if (w <= 0 || h <= 0) return;
+    int x2 = x + w, y2 = y + h;
+    for (int k = 0; k < damage_count;) {
+        DamageRect *d = &damage[k];
+        int ux = x < d->x ? x : d->x, uy = y < d->y ? y : d->y;
+        int ux2 = x2 > d->x + d->w ? x2 : d->x + d->w;
+        int uy2 = y2 > d->y + d->h ? y2 : d->y + d->h;
+        int enclosing = (ux2 - ux) * (uy2 - uy);
+        int pieces = (x2 - x) * (y2 - y) + d->w * d->h;
+        if (x <= d->x + d->w && x2 >= d->x && y <= d->y + d->h && y2 >= d->y && enclosing * 100 <= pieces * 118) {
+            if (d->x < x) x = d->x;
+            if (d->y < y) y = d->y;
+            if (d->x + d->w > x2) x2 = d->x + d->w;
+            if (d->y + d->h > y2) y2 = d->y + d->h;
+            damage[k] = damage[--damage_count];
+            k = 0;
+        } else k++;
+    }
+    if (damage_count >= 32) { damage_count = 1; damage[0] = (DamageRect){0, 0, sw, sh}; return; }
+    damage[damage_count++] = (DamageRect){x, y, x2 - x, y2 - y};
+}
+
+static void add_window_damage(DamageRect d) {
+    add_damage(d.x - 24, d.y - 24, d.w + 48, d.h + 56);
+}
+
+static int snap_preview_side(void) {
+    if (drag_app < 0 || sw < 1000) return 0;
+    if (mouse_x <= 14) return -1;
+    if (mouse_x >= sw - 15) return 1;
+    return 0;
+}
+
+static void add_preview_damage(int side) {
+    if (side) add_damage(side < 0 ? 0 : sw / 2 - 2, 0, sw / 2 + 2, sh - 58);
+}
+
+static void add_tooltip_damage(int hover, int x, int shown) {
+    if (hover < 0 || hover >= APPS) return;
+    int w = shown ? 196 : size(app_name[hover]) * 8 + 24;
+    int h = shown ? 147 : 29;
+    int left = x - w / 2;
+    if (left < 8) left = 8;
+    if (left + w > sw - 8) left = sw - 8 - w;
+    add_damage(left - 20, sh - (shown ? 207 : 87) - 20, w + 40, h + 44);
+}
+
+static void draw_scene(void) {
     draw_desktop();
     int placed[APPS] = {0};
     for (int n = 0; n < APPS; n++) {
@@ -1738,8 +1848,109 @@ static void repaint(void) {
     draw_quick();
     draw_notifications();
     draw_tooltip();
-    draw_pointer();
-    present();
+}
+
+static void repaint(void) {
+    int entire = !frame_valid || frame_theme != theme || frame_wallpaper != wallpaper ||
+        frame_glass != glass_level || frame_accent != accent_index || !dirty;
+    DamageRect current[APPS];
+    int visible[APPS];
+    clip_full();
+    if (pointer_saved) {
+        for (int y = 0; y < 18; y++) for (int x = 0; x < 12; x++) {
+            int px = pointer_old_x + x, py = pointer_old_y + y;
+            if ((unsigned)px < (unsigned)sw && (unsigned)py < (unsigned)sh)
+                canvas[(size_t)py * sw + px] = pointer_back[y][x];
+        }
+        pointer_saved = 0;
+    }
+    damage_count = 0;
+    if (!entire) add_damage(0, sh - 52, sw, 52);
+    int changed_window = 0;
+    int order_changed = 0;
+    for (int i = 0; i < APPS; i++) {
+        visible[i] = (windows[i].opened && !windows[i].minimized) || anim_visible[i];
+        current[i] = (DamageRect){0, 0, 0, 0};
+        if (visible[i]) {
+            animated_window_rect(i, &current[i].x, &current[i].y, &current[i].w, &current[i].h);
+        }
+        if (!entire) {
+            int differs = last_window_visible[i] != visible[i];
+            if (visible[i] && last_window_visible[i]) {
+                DamageRect d = last_window_rect[i];
+                if (d.x != current[i].x || d.y != current[i].y || d.w != current[i].w || d.h != current[i].h) differs = 1;
+                if (last_window_order[i] != windows[i].order) order_changed = 1;
+            }
+            if (differs) {
+                changed_window = 1;
+                if (last_window_visible[i]) add_window_damage(last_window_rect[i]);
+                if (visible[i]) add_window_damage(current[i]);
+            }
+        }
+    }
+    if (!entire) {
+        if (order_changed) {
+            for (int i = 0; i < APPS; i++) {
+                if (visible[i]) add_window_damage(current[i]);
+                if (last_window_visible[i]) add_window_damage(last_window_rect[i]);
+            }
+        }
+        if (!changed_window && !order_changed && !start_open && !context_open && !quick_open && !notification_open &&
+            !last_start && !last_context && !last_quick && !last_notification) {
+            int focus = active_window();
+            if (focus >= 0 && visible[focus]) add_window_damage(current[focus]);
+            if (last_active >= 0 && last_active != focus && last_window_visible[last_active]) add_window_damage(last_window_rect[last_active]);
+        }
+        if (start_open || last_start) add_damage(menu_left() - 24, menu_top() - 26, menu_width() + 48, menu_height() + 55);
+        if (context_open) add_damage(context_x - 23, context_y - 25, context_width() + 46, context_height() + 57);
+        if (last_context) add_damage(last_context_x - 23, last_context_y - 25, context_width() + 46, context_height() + 57);
+        if (quick_open || last_quick) add_damage(sw - quick_width() - 39, sh - 60 - quick_height() - 24, quick_width() + 62, quick_height() + 55);
+        if (notification_open || last_notification) add_damage(notification_left() - 25, notification_top() - 25, notification_width() + 50, notification_height() + 58);
+        add_tooltip_damage(last_hover, last_hover_x, last_hover_running);
+        if (!start_open && !context_open && !quick_open && !notification_open) add_tooltip_damage(task_hover, mouse_x, task_hover >= 0 && windows[task_hover].opened && !windows[task_hover].minimized);
+        add_preview_damage(last_snap_side);
+        add_preview_damage(snap_preview_side());
+    }
+    if (entire) {
+        clip_full();
+        draw_scene();
+        draw_pointer();
+        present();
+        full_frames++;
+    } else {
+        for (int i = 0; i < damage_count; i++) {
+            DamageRect d = damage[i];
+            clip_left = d.x; clip_top = d.y; clip_right = d.x + d.w; clip_bottom = d.y + d.h;
+            draw_scene();
+            present_region(d.x, d.y, d.w, d.h);
+        }
+        clip_full();
+        draw_pointer();
+        present_region(mouse_x, mouse_y, 12, 18);
+        damage_frames++;
+    }
+    for (int i = 0; i < APPS; i++) {
+        last_window_rect[i] = current[i];
+        last_window_visible[i] = (uint8_t)visible[i];
+        last_window_order[i] = windows[i].order;
+    }
+    last_start = start_open;
+    last_quick = quick_open;
+    last_notification = notification_open;
+    last_context = context_open;
+    last_context_x = context_x;
+    last_context_y = context_y;
+    last_hover = task_hover;
+    last_hover_x = mouse_x;
+    last_hover_running = task_hover >= 0 && windows[task_hover].opened && !windows[task_hover].minimized;
+    last_active = active_window();
+    last_snap_side = snap_preview_side();
+    frame_theme = theme;
+    frame_accent = accent_index;
+    frame_glass = glass_level;
+    frame_wallpaper = wallpaper;
+    frame_valid = 1;
+    pointer_only = 0;
     dirty = 0;
     for (int i = 0; i < APPS; i++) {
         if (anim_ticks[i] > 0) {
