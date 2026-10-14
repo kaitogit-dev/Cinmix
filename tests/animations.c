@@ -164,8 +164,8 @@ int main(void) {
     toggle_desktop();
     check(desktop_hidden);
     check(windows[FILES].minimized && windows[NOTES].minimized);
-    check(anim_visible[FILES] && anim_exit[FILES] && anim_ticks[FILES] == 7);
-    check(anim_visible[NOTES] && anim_exit[NOTES] && anim_ticks[NOTES] == 7);
+    check(anim_visible[FILES] && anim_exit[FILES] && anim_ticks[FILES] == WINDOW_CLOSE_STEPS);
+    check(anim_visible[NOTES] && anim_exit[NOTES] && anim_ticks[NOTES] == WINDOW_CLOSE_STEPS);
     frames(8);
     check(!anim_visible[FILES] && !anim_visible[NOTES]);
     toggle_desktop();

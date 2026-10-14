@@ -87,9 +87,9 @@ int main(void) {
     frames(2);
     snap("build/accent.ppm");
     open_window(FILES);
-    require(anim_ticks[FILES] == 7);
+    require(anim_ticks[FILES] == WINDOW_OPEN_STEPS);
     frames(2);
-    require(anim_ticks[FILES] == 5);
+    require(anim_ticks[FILES] == WINDOW_OPEN_STEPS - 2);
     snap("build/animation.ppm");
     frames(7);
     require(anim_ticks[FILES] == 0);

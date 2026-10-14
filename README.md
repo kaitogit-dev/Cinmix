@@ -1,15 +1,21 @@
-# Cinmix 0.13.2
+# Cinmix 0.13.3
 
 Cinmix is a freestanding 32-bit x86 desktop operating system designed for a legacy BIOS El Torito CD image at 1280 x 720. Its desktop combines Aero-style glass, a centered icon-only taskbar, anti-aliased edges, animated windows, and lightweight built-in apps.
 
-## Fixed in 0.13.2
+## Fixed in 0.13.3
+
+- Restored a rounded translucent tile behind **hovered and active taskbar apps**. Inactive apps remain tile-free, and the active/running underlines are preserved. Desktop shortcuts are unchanged.
+- Opening and restoring windows now use a four-step eased transition instead of seven, beginning closer to their final position and size. Maximize and snap transitions use five steps instead of seven.
+- Kept the seven-step closing and minimizing tween for a smooth exit.
+- Added `tests/ui133.c` to verify animation duration, interpolated window geometry, opening/restoring behavior, and taskbar highlight colors.
+
+## Retained from 0.13.2
 
 - Reversible opening and closing tweens for Start, desktop context menu, Quick Panel, Notification Center, Run, Alt+Tab, and taskbar hover tooltips.
-- Closing a popup partway through its opening animation now reverses smoothly instead of snapping away.
-- Fixed stale popup pixels remaining on the screen after the last closing frame.
-- Show Desktop now uses the regular minimize animation, and restoring the desktop reverses active minimizes or animates windows back.
+- Closing a popup partway through its opening animation reverses smoothly instead of snapping away.
+- Cleanup of stale popup pixels after the last closing frame.
+- Show Desktop uses the regular minimize animation, and restoring windows animates them back.
 - These transitions use the existing 60 Hz-paced damage-region compositor rather than forcing full-screen redraws.
-- Added `tests/animations.c` with pixel-exact framebuffer checks, click and keyboard close paths, mid-tween reversals, window minimize and restore checks.
 
 ## Existing appearance refinements (0.13.1)
 
@@ -22,7 +28,7 @@ Cinmix is a freestanding 32-bit x86 desktop operating system designed for a lega
 - Fixed taskbar hover labels so they wait about one second before appearing, instead of showing immediately.
 - Removed generic app-open notifications, so opening Files or other apps no longer spams Notification Center.
 - Added a Run dialog. Open it with `Ctrl+R` or from Quick Panel, type commands like `files`, `notes`, `console`, `appearance`, `calendar`, `desktop`, `reboot`, or `shutdown`, then press Enter.
-- Retained clean tile-free desktop and taskbar icons, active app underlines, Alt+Tab visual switching, keyboard desktop navigation, resize and snap behavior, Notification Center, Quick Panel, and all ten apps.
+- Retained clean desktop icons and tile-free inactive taskbar icons, active app underlines, Alt+Tab visual switching, keyboard desktop navigation, resize and snap behavior, Notification Center, Quick Panel, and all ten apps.
 
 ## Keyboard shortcuts
 
@@ -48,6 +54,6 @@ Use Linux with GCC, GNU binutils, Python 3 and 32-bit compilation support.
 make verify
 ```
 
-The build produces `Cinmix-0.13.2.iso`. Tests validate ISO and boot structures, window controls through simulated PS/2 mouse packets, compositor updates, icon and keyboard behavior from 0.12, and new 0.13.2 interactions including delayed taskbar labels, the Run dialog, and silent app launches. Native tests and static ISO checks are **not** a substitute for full BIOS emulator testing. Visual smoothness and runtime performance must be verified in your emulator.
+The build produces `Cinmix-0.13.3.iso`. Tests validate ISO and boot structures, window controls through simulated PS/2 mouse packets, compositor updates, icon and keyboard behavior from 0.12, and the new 0.13.3 highlighted taskbar and shortened opening animations. Native tests and static ISO checks are **not** a substitute for full BIOS emulator testing. Visual smoothness and runtime performance must be verified in your emulator.
 
 Software volume controls do not yet output audio through a hardware driver. Font licensing is in `FONT-LICENSE.txt`.

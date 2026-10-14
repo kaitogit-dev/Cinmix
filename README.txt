@@ -1,5 +1,5 @@
-Cinmix 0.13.2 | BIOS i386 | 1280x720
+Cinmix 0.13.3 | BIOS i386 | 1280x720
 
-New in 0.13.2: reversible open/close animations for Start, context menu, Quick Panel, Notification Center, Run, Alt+Tab and taskbar tooltips; animated Show Desktop minimize and restore; final-frame damage cleanup.
+New in 0.13.3: responsive four-frame eased window opening/restore, five-frame maximize/snap transitions, and restored rounded translucent highlights for active/hovered taskbar apps. Window closing/minimizing tweens remain seven frames.
 
-Includes the 0.13.1 enlarged desktop icons, refined hover labels, 0.13 SVG-based cursor, one-second tooltip delay, silent app launching, Run dialog, icon-only taskbar, notifications and existing applications.
+Retains reversible animations for Start, context menu, Quick Panel, Notification Center, Run, Alt+Tab and tooltips; animated Show Desktop; enlarged desktop icons; clean inactive taskbar items; anti-aliased SVG cursor; one-second hover delay; silent app launching; native desktop applications.

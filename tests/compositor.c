@@ -38,9 +38,9 @@ int main(void) {
     open_window(FILES);
     animation_step_allowed=0;
     frame();
-    require(anim_ticks[FILES]==7 && !dirty);
+    require(anim_ticks[FILES]==WINDOW_OPEN_STEPS && !dirty);
     for (int i=0;i<6;i++) frame();
-    require(anim_ticks[FILES]==7);
+    require(anim_ticks[FILES]==WINDOW_OPEN_STEPS);
     animation_step_allowed=1;
     for (int i=0;i<8;i++) frame();
     require(anim_ticks[FILES]==0 && !anim_visible[FILES] && !dirty);
